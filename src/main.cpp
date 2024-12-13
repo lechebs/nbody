@@ -2,7 +2,7 @@
 
 int main()
 {
-    Renderer renderer(900, 900);
+    Renderer renderer(1280, 720);
 
     if (renderer.init()) {
         renderer.run();
