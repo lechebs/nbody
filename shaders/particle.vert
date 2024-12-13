@@ -25,10 +25,10 @@ void main()
 
 	// Determines the size of the particle
 	float scale = min(RADIUS * particles[gl_InstanceID].mass, 0.1f);
-	// Position in world coordinates
-	vec3 world_translate = particles[gl_InstanceID].position;
+	// Position in camera coordinates
+	vec4 eye_pos = world_to_camera *
+				   vec4(particles[gl_InstanceID].position, 1.0f);
 
 	gl_Position = perspective_projection *
-				  world_to_camera *
-				  vec4(scale * vert_pos + world_translate, 1.0f);
+				  (vec4(scale * vert_pos, 1.0f) + eye_pos);
 }
