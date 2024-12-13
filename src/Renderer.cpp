@@ -5,6 +5,8 @@
 #include <cassert>
 #include <cstdlib>
 #include <cmath>
+#include <fstream>
+#include <vector>
 
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
@@ -40,85 +42,49 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    // Quick and dirty simulation to test rendering (BAD CODE FOLLOWS)
+    std::ifstream sim_data_raw("bodyData.txt");
+    // Read bodies count
+    int n_bodies;
+    sim_data_raw >> n_bodies;
 
-    std::array<std::array<float, 4>, N> pos; // pos[i][3] holds mass
-    std::array<std::array<float, 2>, N> vel;
-    std::array<std::array<float, 2>, N> forces;
-    const float dt = 1e-4;
+    std::vector<std::array<float, 4>> sim_data;
+    sim_data.reserve(n_bodies * 1001);
+    std::cout << sim_data.size() << std::endl;
 
-    for (unsigned int i = 0; i < N; ++i) {
-        pos[i][0] = (rand() % 800 - 400) / 500.0;
-        pos[i][1] = (rand() % 800 - 400) / 500.0;
-        pos[i][2] = 0.0;
-        pos[i][3] = 1.0f;
-        // Setting intial velocity to be
-        // perpendicular to position
-        float vx = -pos[i][1];
-        float vy = pos[i][0];
-        float mag = sqrt(vx * vx + vy * vy);
-        vel[i][0] = vx / mag * 300;
-        vel[i][1] = vy / mag * 500;
+    // Read masses
+    for (int i = 0; i < n_bodies; ++i) {
+        float mass;
+        sim_data_raw >> mass;
     }
 
-    pos[0][0] = 0.0f;
-    pos[0][1] = 0.0f;
-    vel[0][0] = 0.0f;
-    vel[0][1] = 0.0f;
-    pos[0][3] = 500.0f;
-    pos[1][3] = 2.0f;
+    // For each timestep
+    for (int i = 0; i <= 1001; ++i) {
+        for (int j = 0; j < n_bodies; ++j) {
+            int idx = i * n_bodies + j;
+            sim_data_raw >> sim_data[idx][0];
+            sim_data_raw >> sim_data[idx][1];
+            sim_data[idx][2] = 0.0f;
+            sim_data[idx][3] = 1.0f; // mass
+        }
+    }
+
+    int timestep = 0;
+    int frames = 0;
 
     while (_running) {
         _handleEvents();
         _updateDeltaTime();
 
-        for (unsigned int i = 0; i < N; ++i) {
-            forces[i][0] = 0.0f;
-            forces[i][1] = 0.0f;
-        }
-
-        for (unsigned int i = 0; i < N; ++i) {
-            // Pacheco first optimization
-            for (unsigned int j = i + 1; j < N; ++j) {
-
-                float dist_x = pos[j][0] - pos[i][0];
-                float dist_y = pos[j][1] - pos[i][1];
-
-
-                float dist = sqrt(dist_x * dist_x + dist_y * dist_y) + 1e-12;
-                float rad_x = dist_x / dist;
-                float rad_y = dist_y / dist;
-
-                float force_x = 100.0 * pos[i][3] * pos[j][3] /
-                    dist * dist * rad_x;
-                float force_y = 100.0 * pos[i][3] * pos[j][3] /
-                    dist * dist * rad_y;
-
-                forces[i][0] += force_x;
-                forces[i][1] += force_y;
-
-                forces[j][0] -= force_x;
-                forces[j][1] -= force_y;
-            }
-        }
-
-        for (unsigned int i = 0; i < N; ++i) {
-            // Backwards euler
-            vel[i][0] += forces[i][0] / pos[i][3] * dt;
-            vel[i][1] += forces[i][1] / pos[i][3] * dt;
-
-            pos[i][0] += vel[i][0] * dt;
-            pos[i][1] += vel[i][1] * dt;
-        }
-
         // Copying updated positions to GPU memory.
         glBufferData(GL_SHADER_STORAGE_BUFFER,
-                     sizeof(pos),
-                     pos.data(),
-                     GL_DYNAMIC_DRAW);
+                 n_bodies * sizeof(std::array<float, 4>),
+                 sim_data.data() + timestep * n_bodies,
+                 GL_DYNAMIC_DRAW);
 
-        // _camera.move({ 0.0, 0.0, 1.0 });
-        // _camera.lookAt({ 0.0, 0.0, 0.0 });
+        if (frames == 0)
+            timestep = (timestep + 1) % 1000;
+
+        frames = (frames + 1) % 1;
 
         _updateCamera();
         _renderFrame();
