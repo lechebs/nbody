@@ -57,18 +57,21 @@ __device__ __forceinline__ int _sign(int x)
 __device__ int _find_split(uint32_t *codes,
                            int first,
                            int last,
-                           int dir)
+                           int dir,
+                           int num_leaves)
 {
     // Length of prefix covered by the internal node
     int node_lcp = _lcp_safe(codes, first, last);
 
     int step = 0;
     int length = (last - first) * dir;
+
     do {
-        length = (length + 1) << 1;
+        length = (length + 1) >> 1;
 
         if (_lcp_safe(
-                codes, first, first + (step + length) * dir) > node_lcp) {
+                codes, first, first + (step + length) * dir) >
+                node_lcp) {
             step += length;
         }
     } while (length > 1);
@@ -109,14 +112,15 @@ __global__ void build_radix_tree(uint32_t *codes,
     do {
         // Half the step size
         step = step >> 1;
-        if (_lcp_safe(codes, first, first + (length + step) * d) > lcp_min) {
+        if (_lcp(codes, first, first + (length + step) * d, num_leaves) >
+            lcp_min) {
             length += step;
         }
     } while (step > 1);
     // End of the range of leaves covered
     int last = first + length * d;
 
-    int split = _find_split(codes, first, last, d);
+    int split = _find_split(codes, first, last, d, num_leaves);
 
     // Record parent-child relationships
     bool is_left_leaf = min(first, last) == split;
@@ -125,3 +129,4 @@ __global__ void build_radix_tree(uint32_t *codes,
     internal->set_left(first, split, is_left_leaf);
     internal->set_right(first, split + 1, is_right_left);
 }
+

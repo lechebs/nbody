@@ -9,8 +9,15 @@
 
 #include "radix_tree_gpu.cuh"
 
-constexpr int NUM_POINTS = 2 << 10;
-constexpr int THREADS_PER_BLOCK = 128;
+constexpr int NUM_POINTS = 2 << 4;
+constexpr int THREADS_PER_BLOCK = 32;
+
+void print_bits(uint32_t u)
+{
+    for (int i = 0; i < 32; ++i) {
+        printf("%d", (u >> (31 - i)) & 0x01);
+    }
+}
 
 // Allocates device memory to store SoA
 // and copies member data from host
@@ -68,8 +75,15 @@ int main()
     // Sorting and removing duplicates
     thrust::sort(d_codes.begin(), d_codes.end());
     auto unique_end = thrust::unique(d_codes.begin(), d_codes.end());
-
     int num_unique_points = unique_end - d_codes.begin();
+
+    thrust::host_vector<uint32_t> h_unique_codes(d_codes);
+
+    for (int i = 0; i < num_unique_points; ++i) {
+        printf("%2d: %12u ", i, h_unique_codes[i]);
+        print_bits(h_unique_codes[i]);
+        printf("\n");
+    }
 
     build_radix_tree
     <<<num_unique_points / THREADS_PER_BLOCK, THREADS_PER_BLOCK>>>(
@@ -78,6 +92,15 @@ int main()
         num_unique_points);
 
     cudaDeviceSynchronize();
+
+    thrust::host_vector<int> h_left(d_left);
+    thrust::host_vector<int> h_right(d_right);
+
+    std::cout << "Unique pts: " << num_unique_points << std::endl;
+
+    for (int i = 0; i < num_unique_points - 1; ++i) {
+        printf("%2d: %2d %2d\n", i, h_left[i], h_right[i]);
+    }
 
     std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;
 
