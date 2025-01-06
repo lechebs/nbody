@@ -1,5 +1,3 @@
-#include <cstdio>
-
 #include "radix_tree_gpu.cuh"
 
 __device__ __forceinline__ uint32_t _expand_bits(uint32_t u)
@@ -43,7 +41,7 @@ __device__ __forceinline__ int _lcp_safe(uint32_t *codes, int i, int j)
 __device__ __forceinline__ int _lcp(uint32_t *codes, int i, int j, int n)
 {
     // i index is always in range
-    if (j < 0 || j > n - 1)
+if (j < 0 || j > n - 1)
         return -1;
     else 
         return _lcp_safe(codes, i, j);
@@ -57,12 +55,9 @@ __device__ __forceinline__ int _sign(int x)
 __device__ int _find_split(uint32_t *codes,
                            int first,
                            int last,
-                           int dir,
-                           int num_leaves)
+                           int node_lcp,
+                           int dir)
 {
-    // Length of prefix covered by the internal node
-    int node_lcp = _lcp_safe(codes, first, last);
-
     int step = 0;
     int length = (last - first) * dir;
 
@@ -120,13 +115,43 @@ __global__ void build_radix_tree(uint32_t *codes,
     // End of the range of leaves covered
     int last = first + length * d;
 
-    int split = _find_split(codes, first, last, d, num_leaves);
+    // Length of prefix covered by the internal node
+    int node_lcp = _lcp_safe(codes, first, last);
+    int split = _find_split(codes, first, last, node_lcp, d);
 
-    // Record parent-child relationships
     bool is_left_leaf = min(first, last) == split;
     bool is_right_left = max(first, last) == split + 1;
 
-    internal->set_left(first, split, is_left_leaf);
-    internal->set_right(first, split + 1, is_right_left);
+    // Record parent-child relationships
+    internal->set_left(first, split, node_lcp, is_left_leaf);
+    internal->set_right(first, split + 1, node_lcp, is_right_left);
 }
 
+// Sorting internal nodes by lcp should guarantee
+// bfs ordering of the octree nodes, gather/scatter
+// would then be needed to reorder _left, _right
+// and _edge_delta
+
+// Compute exclusive scan of _edge_delta to obtain index
+// of octree node corresponding to ascending edge of a node
+
+__global__ void build_octree()
+{
+    // For each internal node and leaf node
+    // The parent of the current node is the closest ancestor k
+    // such that _edge_delta[k] > 0, in this case take the 
+    // k-th value of the scan of _edge_delta
+
+    // otherwise
+
+    // For each internal node k such that _edge_delta[k] > 0 (for each octree node)
+    // for both children c = _left[k]/_right[k]
+    // if _edge_delta[c] > 0 or c is a leaf
+    //   c is child of octree node k
+    //   c and k can index into scan(_edge_delta) to obtain corresp octree node
+    // else visit grandchildren
+
+    // If the nodes bfs-ordered we could perhaps get 
+    // away with finding only the first children
+    // of each node (by visiting left descendants)
+}

@@ -10,7 +10,7 @@
 #include "radix_tree_gpu.cuh"
 
 constexpr int NUM_POINTS = 2 << 4;
-constexpr int THREADS_PER_BLOCK = 32;
+constexpr int THREADS_PER_BLOCK = 32; //256;
 
 void print_bits(uint32_t u)
 {
@@ -43,7 +43,8 @@ int main()
 
     thrust::generate(h_x.begin(), h_x.end(), [&] { return dist(rng); });
     thrust::generate(h_y.begin(), h_y.end(), [&] { return dist(rng); });
-    thrust::fill(h_z.begin(), h_z.end(), 0.0f);
+    thrust::generate(h_z.begin(), h_z.end(), [&] { return dist(rng); });
+    // thrust::fill(h_z.begin(), h_z.end(), 0.0f);
 
     // Allocate device memory to store points coordinates
     thrust::device_vector<float> d_x(h_x);
@@ -65,11 +66,13 @@ int main()
     // Allocate device memory to store the radix tree nodes
     thrust::device_vector<int> d_left(NUM_POINTS - 1);
     thrust::device_vector<int> d_right(NUM_POINTS - 1);
+    thrust::device_vector<int> d_edge_delta(2 * NUM_POINTS - 1);
     // Initializes nodes SoA and copy to device
     Nodes *h_nodes = new Nodes(
         NUM_POINTS,
         thrust::raw_pointer_cast(&d_left[0]),
-        thrust::raw_pointer_cast(&d_right[0]));
+        thrust::raw_pointer_cast(&d_right[0]),
+        thrust::raw_pointer_cast(&d_edge_delta[0]));
     Nodes *d_nodes = alloc_device_soa(h_nodes, sizeof(Nodes));
 
     // Sorting and removing duplicates
@@ -79,8 +82,8 @@ int main()
 
     thrust::host_vector<uint32_t> h_unique_codes(d_codes);
 
-    for (int i = 0; i < num_unique_points; ++i) {
-        printf("%2d: %12u ", i, h_unique_codes[i]);
+    for (int i = 0; i < 32; ++i) {
+        printf("%4d: %12u ", i, h_unique_codes[i]);
         print_bits(h_unique_codes[i]);
         printf("\n");
     }
@@ -95,11 +98,13 @@ int main()
 
     thrust::host_vector<int> h_left(d_left);
     thrust::host_vector<int> h_right(d_right);
+    thrust::host_vector<int> h_edge_delta(d_edge_delta);
 
     std::cout << "Unique pts: " << num_unique_points << std::endl;
 
-    for (int i = 0; i < num_unique_points - 1; ++i) {
-        printf("%2d: %2d %2d\n", i, h_left[i], h_right[i]);
+    for (int i = 0; i < 32 - 1; ++i) {
+        printf("%4d: %4d %4d - d: %d\n",
+               i, h_left[i], h_right[i], h_edge_delta[i]);
     }
 
     std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;
