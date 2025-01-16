@@ -1,4 +1,8 @@
-#include "radix_tree_gpu.cuh"
+#include "btree_gpu.cuh"
+
+#include <thrust/device_ptr.h>
+#include <thrust/sort.h>
+#include <thrust/scatter.h>
 
 __device__ __forceinline__ uint32_t _expand_bits(uint32_t u)
 {
@@ -74,12 +78,15 @@ __device__ int _find_split(uint32_t *codes,
     return first + step * dir + min(dir, 0);
 }
 
-__global__ void build_radix_tree(uint32_t *codes,
-                                 Nodes *internal,
-                                 int num_leaves)
+__global__ void build_radix_tree(uint32_t *codes, Btree *btree)
 {
     int first = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int num_leaves = btree->get_num_leaves();
     if (first > num_leaves - 2) return;
+
+    // Fill tmp arrays used for later computations
+    btree->set_tmp_ranges(first, first);
 
     // Determines whether the left or right
     // leaf is part of the current internal node
@@ -123,35 +130,68 @@ __global__ void build_radix_tree(uint32_t *codes,
     bool is_right_left = max(first, last) == split + 1;
 
     // Record parent-child relationships
-    internal->set_left(first, split, node_lcp, is_left_leaf);
-    internal->set_right(first, split + 1, node_lcp, is_right_left);
+    btree->set_left(first, split, node_lcp, is_left_leaf);
+    btree->set_right(first, split + 1, node_lcp, is_right_left);
+
+    btree->set_depth(first, node_lcp / 3);
 }
 
-// Sorting internal nodes by lcp should guarantee
-// bfs ordering of the octree nodes, gather/scatter
-// would then be needed to reorder _left, _right
-// and _edge_delta
-
-// Compute exclusive scan of _edge_delta to obtain index
-// of octree node corresponding to ascending edge of a node
-
-__global__ void build_octree()
+Btree::Btree(int num_leaves) : _num_leaves(num_leaves)
 {
-    // For each internal node and leaf node
-    // The parent of the current node is the closest ancestor k
-    // such that _edge_delta[k] > 0, in this case take the 
-    // k-th value of the scan of _edge_delta
+    // Allocating device memory for internal nodes
+    cudaMalloc(&_left, (num_leaves - 1) * sizeof(int));
+    cudaMalloc(&_right, (num_leaves - 1) * sizeof(int));
+    cudaMalloc(&_depth, (num_leaves - 1) * sizeof(int));
+    // Allocating device memory for internal nodes and leaf nodes
+    cudaMalloc(&_edge_delta, (2 * num_leaves - 1) * sizeof(int));
 
-    // otherwise
+    // Allocating device memory used for intermediate computations
+    cudaMalloc(&_tmp_range1, (num_leaves - 1) * sizeof(int));
+    cudaMalloc(&_tmp_range2, (num_leaves - 1) * sizeof(int));
 
-    // For each internal node k such that _edge_delta[k] > 0 (for each octree node)
-    // for both children c = _left[k]/_right[k]
-    // if _edge_delta[c] > 0 or c is a leaf
-    //   c is child of octree node k
-    //   c and k can index into scan(_edge_delta) to obtain corresp octree node
-    // else visit grandchildren
-
-    // If the nodes bfs-ordered we could perhaps get 
-    // away with finding only the first children
-    // of each node (by visiting left descendants)
+    // Allocating object copy in device memory
+    cudaMalloc(&_d_this, sizeof(Btree));
+    cudaMemcpy(_d_this, this, sizeof(Btree), cudaMemcpyHostToDevice);
 }
+
+void Btree::build(uint32_t *d_sorted_codes)
+{
+    build_radix_tree<<<_num_leaves / THREADS_PER_BLOCK,
+                       THREADS_PER_BLOCK>>>(d_sorted_codes, _d_this);
+}
+
+void Btree::sort_to_bfs_order()
+{
+    // Sort arrays by depth
+    thrust::stable_sort_by_key(
+        thrust::device,
+        _depth,
+        _depth + _num_leaves - 1,
+        // Consider using device_vector for all arrays
+        thrust::make_zip_iterator(
+            thrust::device_pointer_cast(_left),
+            thrust::device_pointer_cast(_right),
+            thrust::device_pointer_cast(_edge_delta),
+            thrust::device_pointer_cast(_tmp_range1)));
+
+    // Update child pointers
+
+    // TODO: scatter_if _left1 and _right1 with condition
+    // _left1[i] (_right1[i]) < num_leaves - 1 using as
+    // map _tmp_range1 into _left2 and _right2, then copy_if
+    // _left1 and _right1 into _left2 and _right2 using
+    // the previous condition negated
+}
+
+Btree::~Btree()
+{
+    // Releasing device memory
+    cudaFree(_left);
+    cudaFree(_right);
+    cudaFree(_depth);
+    cudaFree(_edge_delta);
+
+    cudaFree(_d_this);
+}
+
+

@@ -6,11 +6,13 @@
 #include <thrust/random.h>
 #include <thrust/sort.h>
 #include <thrust/unique.h>
+#include <thrust/scan.h>
+#include <thrust/gather.h>
 
-#include "radix_tree_gpu.cuh"
+#include "utils_gpu.cuh"
+#include "btree_gpu.cuh"
 
 constexpr int NUM_POINTS = 2 << 4;
-constexpr int THREADS_PER_BLOCK = 32; //256;
 
 void print_bits(uint32_t u)
 {
@@ -19,17 +21,21 @@ void print_bits(uint32_t u)
     }
 }
 
-// Allocates device memory to store SoA
-// and copies member data from host
-template<class T>
-T *alloc_device_soa(T *data, std::size_t size)
+__global__ void gather_child_pointers(int *left,
+                                      int *right,
+                                      int *indices,
+                                      int num_leaves)
 {
-    void *device_data;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    cudaMalloc(&device_data, size);
-    cudaMemcpy(device_data, data, size, cudaMemcpyHostToDevice);
+    if (left[idx] < num_leaves - 1) {
+        // Inefficient scatter read
+        left[idx] = indices[left[idx]];
+    }
 
-    return (T *) device_data;
+    if (right[idx] < num_leaves - 1) {
+        right[idx] = indices[right[idx]];
+    }
 }
 
 int main()
@@ -63,57 +69,68 @@ int main()
     morton_encode<<<NUM_POINTS / THREADS_PER_BLOCK, THREADS_PER_BLOCK>>>(
         d_points, thrust::raw_pointer_cast(&d_codes[0]));
 
-    // Allocate device memory to store the radix tree nodes
-    thrust::device_vector<int> d_left(NUM_POINTS - 1);
-    thrust::device_vector<int> d_right(NUM_POINTS - 1);
-    thrust::device_vector<int> d_edge_delta(2 * NUM_POINTS - 1);
-    // Initializes nodes SoA and copy to device
-    Nodes *h_nodes = new Nodes(
-        NUM_POINTS,
-        thrust::raw_pointer_cast(&d_left[0]),
-        thrust::raw_pointer_cast(&d_right[0]),
-        thrust::raw_pointer_cast(&d_edge_delta[0]));
-    Nodes *d_nodes = alloc_device_soa(h_nodes, sizeof(Nodes));
-
     // Sorting and removing duplicates
     thrust::sort(d_codes.begin(), d_codes.end());
     auto unique_end = thrust::unique(d_codes.begin(), d_codes.end());
     int num_unique_points = unique_end - d_codes.begin();
 
     thrust::host_vector<uint32_t> h_unique_codes(d_codes);
-
     for (int i = 0; i < 32; ++i) {
         printf("%4d: %12u ", i, h_unique_codes[i]);
         print_bits(h_unique_codes[i]);
         printf("\n");
     }
 
-    build_radix_tree
-    <<<num_unique_points / THREADS_PER_BLOCK, THREADS_PER_BLOCK>>>(
-        thrust::raw_pointer_cast(&d_codes[0]),
-        d_nodes,
-        num_unique_points);
+    Btree h_btree(num_unique_points);
+    h_btree.build(thrust::raw_pointer_cast(&d_codes[0]));
+    h_btree.sort_to_bfs_order();
 
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
+
+    // Correct pointers to child nodes
+    // WARNING: pointers to leaf nodes should remaing intact
+    /*
+    thrust::device_vector<int> d_range(h_indices);
+    thrust::device_vector<int> d_scattered_indices(num_unique_points - 1);
+    thrust::scatter(d_range.begin(),
+                    d_range.end(),
+                    d_indices.begin(),
+                    d_scattered_indices.begin());
+    // Can we use a gather if?
+    gather_child_pointers<<<
+         num_unique_points / THREADS_PER_BLOCK, THREADS_PER_BLOCK>>>(
+            h_btree.get_left_ptr()
+            h_btree.get_right_ptr()
+            thrust::raw_pointer_cast(&d_right[0]),
+            thrust::raw_pointer_cast(&d_scattered_indices[0]),
+            num_unique_points);
+
+    thrust::device_vector<int> d_bin2oct(num_unique_points - 1);
+    // Exclusive scan to obtain binary node to octree node mapping
+    thrust::exclusive_scan(d_edge_delta.begin(),
+                           d_edge_delta.begin() + num_unique_points - 1,
+                           d_bin2oct.begin());
 
     thrust::host_vector<int> h_left(d_left);
     thrust::host_vector<int> h_right(d_right);
     thrust::host_vector<int> h_edge_delta(d_edge_delta);
+    thrust::host_vector<int> h_depth(d_depth);
+    thrust::host_vector<int> h_bin2oct(d_bin2oct);
 
     std::cout << "Unique pts: " << num_unique_points << std::endl;
 
     for (int i = 0; i < 32 - 1; ++i) {
-        printf("%4d: %4d %4d - d: %d\n",
-               i, h_left[i], h_right[i], h_edge_delta[i]);
+        printf("%4d: %4d %4d - d: %d %d - depth: %d\n",
+               i, h_left[i], h_right[i], h_edge_delta[i],
+               h_bin2oct[i], h_depth[i]);
     }
+    */
 
     std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;
 
     free(h_points);
-    free(h_nodes);
 
     cudaFree(d_points);
-    cudaFree(d_nodes);
 
     return 0;
 }
