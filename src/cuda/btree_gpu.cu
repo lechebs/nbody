@@ -78,15 +78,12 @@ __device__ int _find_split(uint32_t *codes,
     return first + step * dir + min(dir, 0);
 }
 
-__global__ void build_radix_tree(uint32_t *codes, Btree *btree)
+__global__ void _build_radix_tree(uint32_t *codes, Btree *btree)
 {
     int first = blockIdx.x * blockDim.x + threadIdx.x;
 
     int num_leaves = btree->get_num_leaves();
     if (first > num_leaves - 2) return;
-
-    // Fill tmp arrays used for later computations
-    btree->set_tmp_ranges(first, first);
 
     // Determines whether the left or right
     // leaf is part of the current internal node
@@ -146,20 +143,48 @@ Btree::Btree(int num_leaves) : _num_leaves(num_leaves)
     cudaMalloc(&_edge_delta, (2 * num_leaves - 1) * sizeof(int));
 
     // Allocating device memory used for intermediate computations
-    cudaMalloc(&_tmp_range1, (num_leaves - 1) * sizeof(int));
-    cudaMalloc(&_tmp_range2, (num_leaves - 1) * sizeof(int));
+    cudaMalloc(&_tmp_range, (num_leaves - 1) * sizeof(int));
+    cudaMalloc(&_tmp_perm1, (num_leaves - 1) * sizeof(int));
+    cudaMalloc(&_tmp_perm2, (num_leaves - 1) * sizeof(int));
 
     // Allocating object copy in device memory
     cudaMalloc(&_d_this, sizeof(Btree));
     cudaMemcpy(_d_this, this, sizeof(Btree), cudaMemcpyHostToDevice);
+
+    // TODO: fill these during btree construction
+    thrust::sequence(thrust::device, _tmp_perm1, _tmp_perm1 + num_leaves - 1);
+    thrust::sequence(thrust::device, _tmp_perm2, _tmp_perm2 + num_leaves - 1);
+    thrust::sequence(thrust::device, _tmp_range, _tmp_range + num_leaves - 1);
 }
 
 void Btree::build(uint32_t *d_sorted_codes)
 {
-    build_radix_tree<<<_num_leaves / THREADS_PER_BLOCK,
-                       THREADS_PER_BLOCK>>>(d_sorted_codes, _d_this);
+    _build_radix_tree<<<_num_leaves / THREADS_PER_BLOCK +
+                        (_num_leaves % THREADS_PER_BLOCK > 0),
+                        THREADS_PER_BLOCK>>>(d_sorted_codes, _d_this);
 }
 
+__global__ void _correct_child_pointers(int *left,
+                                        int *right,
+                                        int *map,
+                                        int num_leaves)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx > num_leaves - 2) return;
+
+    int left_value = left[idx];
+    int right_value = right[idx];
+
+    // Quite inefficient
+    if (left_value < num_leaves - 1)
+        left[idx] = map[left_value];
+
+    if (right_value < num_leaves - 1)
+        right[idx] = map[right_value];
+}
+
+// TODO: sorting is costly, compare the traversal
+// performance without bfs ordering
 void Btree::sort_to_bfs_order()
 {
     // Sort arrays by depth
@@ -172,15 +197,21 @@ void Btree::sort_to_bfs_order()
             thrust::device_pointer_cast(_left),
             thrust::device_pointer_cast(_right),
             thrust::device_pointer_cast(_edge_delta),
-            thrust::device_pointer_cast(_tmp_range1)));
+            thrust::device_pointer_cast(_tmp_perm1)));
 
-    // Update child pointers
+    // Reverse _tmp_perm1 mapping into _tmp_perm2
+    thrust::scatter(thrust::device,
+                    _tmp_range,
+                    _tmp_range + _num_leaves - 1,
+                    _tmp_perm1,
+                    _tmp_perm2);
 
-    // TODO: scatter_if _left1 and _right1 with condition
-    // _left1[i] (_right1[i]) < num_leaves - 1 using as
-    // map _tmp_range1 into _left2 and _right2, then copy_if
-    // _left1 and _right1 into _left2 and _right2 using
-    // the previous condition negated
+    _correct_child_pointers<<<_num_leaves / THREADS_PER_BLOCK +
+                              (_num_leaves % THREADS_PER_BLOCK > 0),
+                              THREADS_PER_BLOCK>>>(_left,
+                                                   _right,
+                                                   _tmp_perm2,
+                                                   _num_leaves);
 }
 
 Btree::~Btree()

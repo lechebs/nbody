@@ -12,29 +12,12 @@
 #include "utils_gpu.cuh"
 #include "btree_gpu.cuh"
 
-constexpr int NUM_POINTS = 2 << 4;
+constexpr int NUM_POINTS = 2 << 18;
 
 void print_bits(uint32_t u)
 {
     for (int i = 0; i < 32; ++i) {
         printf("%d", (u >> (31 - i)) & 0x01);
-    }
-}
-
-__global__ void gather_child_pointers(int *left,
-                                      int *right,
-                                      int *indices,
-                                      int num_leaves)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (left[idx] < num_leaves - 1) {
-        // Inefficient scatter read
-        left[idx] = indices[left[idx]];
-    }
-
-    if (right[idx] < num_leaves - 1) {
-        right[idx] = indices[right[idx]];
     }
 }
 
@@ -81,50 +64,23 @@ int main()
         printf("\n");
     }
 
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
     Btree h_btree(num_unique_points);
+    cudaEventRecord(start);
     h_btree.build(thrust::raw_pointer_cast(&d_codes[0]));
     h_btree.sort_to_bfs_order();
+    cudaEventRecord(stop);
 
-    // cudaDeviceSynchronize();
+    cudaEventSynchronize(stop);
 
-    // Correct pointers to child nodes
-    // WARNING: pointers to leaf nodes should remaing intact
-    /*
-    thrust::device_vector<int> d_range(h_indices);
-    thrust::device_vector<int> d_scattered_indices(num_unique_points - 1);
-    thrust::scatter(d_range.begin(),
-                    d_range.end(),
-                    d_indices.begin(),
-                    d_scattered_indices.begin());
-    // Can we use a gather if?
-    gather_child_pointers<<<
-         num_unique_points / THREADS_PER_BLOCK, THREADS_PER_BLOCK>>>(
-            h_btree.get_left_ptr()
-            h_btree.get_right_ptr()
-            thrust::raw_pointer_cast(&d_right[0]),
-            thrust::raw_pointer_cast(&d_scattered_indices[0]),
-            num_unique_points);
+    float ms;
+    cudaEventElapsedTime(&ms, start, stop);
+    std::cout << ms << "ms" << std::endl;
 
-    thrust::device_vector<int> d_bin2oct(num_unique_points - 1);
-    // Exclusive scan to obtain binary node to octree node mapping
-    thrust::exclusive_scan(d_edge_delta.begin(),
-                           d_edge_delta.begin() + num_unique_points - 1,
-                           d_bin2oct.begin());
-
-    thrust::host_vector<int> h_left(d_left);
-    thrust::host_vector<int> h_right(d_right);
-    thrust::host_vector<int> h_edge_delta(d_edge_delta);
-    thrust::host_vector<int> h_depth(d_depth);
-    thrust::host_vector<int> h_bin2oct(d_bin2oct);
-
-    std::cout << "Unique pts: " << num_unique_points << std::endl;
-
-    for (int i = 0; i < 32 - 1; ++i) {
-        printf("%4d: %4d %4d - d: %d %d - depth: %d\n",
-               i, h_left[i], h_right[i], h_edge_delta[i],
-               h_bin2oct[i], h_depth[i]);
-    }
-    */
+    // TODO: scan _edge_delta and construct octree
 
     std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;
 

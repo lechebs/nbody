@@ -5,7 +5,6 @@
 
 typedef unsigned int uint32_t;
 
-
 // SoA to store the binary radix tree
 class Btree
 {
@@ -59,13 +58,6 @@ public:
         _depth[idx] = depth;
     }
 
-    __device__ __forceinline__
-    void set_tmp_ranges(int idx, int value)
-    {
-        _tmp_range1[idx] = value;
-        _tmp_range2[idx] = value;
-    }
-
 private:
     static constexpr int _MAX_LCP = 32;
 
@@ -89,10 +81,12 @@ private:
 
     // Number of internal nodes is _num_leaves - 1
     int _num_leaves;
+
     // Arrays to store pointers (indices) to left and right children
     // of the internal nodes
     int *_left;
     int *_right;
+
     // Array to depth of the internal nodes
     int *_depth;
     // Array to store the number of octree nodes that correspond
@@ -101,8 +95,9 @@ private:
     int *_edge_delta;
 
     // Temporary arrays used for sorting
-    int *_tmp_range1;
-    int *_tmp_range2;
+    int *_tmp_perm1;
+    int *_tmp_perm2;
+    int *_tmp_range;
 
     // Pointer to current object copy in device memory
     Btree *_d_this;
