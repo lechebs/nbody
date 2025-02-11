@@ -4,6 +4,8 @@
 #include <thrust/sort.h>
 #include <thrust/scatter.h>
 
+__constant__ Btree d_btree;
+
 __device__ __forceinline__ uint32_t _expand_bits(uint32_t u)
 {
     u = (u * 0x00010001u) & 0xFF0000FFu;
@@ -78,7 +80,7 @@ __device__ int _find_split(uint32_t *codes,
     return first + step * dir + min(dir, 0);
 }
 
-__global__ void _build_radix_tree(uint32_t *codes, Btree *btree)
+__global__ void _build_radix_tree(uint32_t *codes)
 {
     int first = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -127,10 +129,10 @@ __global__ void _build_radix_tree(uint32_t *codes, Btree *btree)
     bool is_right_left = max(first, last) == split + 1;
 
     // Record parent-child relationships
-    btree->set_left(first, split, node_lcp, is_left_leaf);
-    btree->set_right(first, split + 1, node_lcp, is_right_left);
+    _d_btree.set_left(first, split, node_lcp, is_left_leaf);
+    _d_btree.set_right(first, split + 1, node_lcp, is_right_left);
 
-    btree->set_depth(first, node_lcp / 3);
+    _d_btree.set_depth(first, node_lcp / 3);
 }
 
 Btree::Btree(int num_leaves) : _num_leaves(num_leaves)
@@ -139,17 +141,16 @@ Btree::Btree(int num_leaves) : _num_leaves(num_leaves)
     cudaMalloc(&_left, (num_leaves - 1) * sizeof(int));
     cudaMalloc(&_right, (num_leaves - 1) * sizeof(int));
     cudaMalloc(&_depth, (num_leaves - 1) * sizeof(int));
-    // Allocating device memory for internal nodes and leaf nodes
-    cudaMalloc(&_edge_delta, (2 * num_leaves - 1) * sizeof(int));
+    cudaMalloc(&_edge_delta, (num_leaves - 1) * sizeof(int));
+    cudaMalloc(&_octree_map, (num_leaves - 1) * sizeof(int));
 
     // Allocating device memory used for intermediate computations
     cudaMalloc(&_tmp_range, (num_leaves - 1) * sizeof(int));
     cudaMalloc(&_tmp_perm1, (num_leaves - 1) * sizeof(int));
     cudaMalloc(&_tmp_perm2, (num_leaves - 1) * sizeof(int));
 
-    // Allocating object copy in device memory
-    cudaMalloc(&_d_this, sizeof(Btree));
-    cudaMemcpy(_d_this, this, sizeof(Btree), cudaMemcpyHostToDevice);
+    // Allocating object copy in device constant memory
+    cudaMemcpyToSymbol(_d_btree, this, sizeof(Btree), cudaMemcpyHostToDevice);
 
     // TODO: fill these during btree construction
     thrust::sequence(thrust::device, _tmp_perm1, _tmp_perm1 + num_leaves - 1);
@@ -161,7 +162,9 @@ void Btree::build(uint32_t *d_sorted_codes)
 {
     _build_radix_tree<<<_num_leaves / THREADS_PER_BLOCK +
                         (_num_leaves % THREADS_PER_BLOCK > 0),
-                        THREADS_PER_BLOCK>>>(d_sorted_codes, _d_this);
+                        THREADS_PER_BLOCK>>>(d_sorted_codes);
+
+    _compute_octree_map();
 }
 
 __global__ void _correct_child_pointers(int *left,
@@ -221,8 +224,20 @@ Btree::~Btree()
     cudaFree(_right);
     cudaFree(_depth);
     cudaFree(_edge_delta);
-
-    cudaFree(_d_this);
+    cudaFree(_octree_map);
 }
 
+Btree::_compute_octree_map()
+{
+    // Given an internal node i, if _edge_delta[i] > 0
+    // or i is the root, _octree_map[i] will contain
+    // the index of the corresponding octree node
 
+    thrust::exclusive_scan(thrust::device,
+                           _edge_delta,
+                           _edge_delta + _num_leaves - 1,
+                           _octree_map,
+                           // Making sure root is counted
+                           // as valid octree node
+                           1);
+}

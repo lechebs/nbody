@@ -8,6 +8,7 @@ typedef unsigned int uint32_t;
 // SoA to store the binary radix tree
 class Btree
 {
+// TODO: consider converting to unsigned int
 public:
     Btree(int num_leaves);
 
@@ -21,24 +22,40 @@ public:
 
     __device__ __forceinline__
     bool is_leaf(int node) {
-        // Pointers to leaf nodes are offset by the
-        // number of internal nodes
         return node >= _num_leaves - 1;
     }
 
     __device__ __forceinline__
-    bool is_octree_node(int node) {
-        return _edge_delta[node] > 0;
+    bool is_octree_node(int idx) {
+        return _edge_delta[idx] > 0;
     }
 
     __device__ __forceinline__
-    int get_num_leaves() { return _num_leaves; }
+    int get_num_leaves() {
+        return _num_leaves;
+    }
 
     __device__ __forceinline__
-    int get_left(int idx) { return _left[idx]; }
+    int get_left(int idx) {
+        return _left[idx];
+    }
 
     __device__ __forceinline__
-    int get_right(int idx) { return _right[idx]; }
+    int get_right(int idx) {
+        return _right[idx];
+    }
+
+    __device__ __forceinline__
+    int get_octree_node(int idx) {
+        return _octree_map[idx];
+    }
+
+    __device__ __forceinline__
+    int get_leaf(int node)
+    {
+        // Removes offset from leaf node
+        return node - _num_leaves + 1;
+    }
 
     __device__ __forceinline__
     void set_left(int idx, int left, int lcp, bool is_leaf)
@@ -61,25 +78,36 @@ public:
 private:
     static constexpr int _MAX_LCP = 32;
 
+    // Computes the map between radix tree nodes and octree nodes
+    void _compute_octree_map();
+
     // Computes how many octree nodes correspond
     // to ascending edge of the given node
     __device__ __forceinline__
-    void _compute_edge_delta(int node, int parent_lcp, bool is_leaf)
+    void _compute_edge_delta(int node, int parent_lcp)
     {
-        int node_lcp = is_leaf ? _MAX_LCP : parent_lcp + 1;
-        _edge_delta[node] = node_lcp / 3 - parent_lcp / 3;
+        // int node_lcp = is_leaf ? _MAX_LCP : parent_lcp + 1;
+        int node_lcp = parent_lcp + 1;
+
+        // When _edge_delta[node] > 1, the parent has no siblings
+        _edge_delta[node] = min(1, node_lcp / 3 - parent_lcp / 3);
     }
 
     // Setter for either the left or right child of an internal node
     __device__ __forceinline__
     void _set_child(int *dest, int parent, int child, int lcp, bool is_leaf)
     {
+        // Pointers to leaf nodes are offset by the
+        // number of internal nodes
         child += (_num_leaves - 1) * is_leaf;
         dest[parent] = child;
-        _compute_edge_delta(child, lcp, is_leaf);
+        if (!is_leaf) {
+            _compute_edge_delta(child, lcp);
+        }
     }
 
     // Number of internal nodes is _num_leaves - 1
+    // TODO: const?
     int _num_leaves;
 
     // Arrays to store pointers (indices) to left and right children
@@ -90,18 +118,19 @@ private:
     // Array to depth of the internal nodes
     int *_depth;
     // Array to store the number of octree nodes that correspond
-    // to the ascending edge of each radix tree node (both internal
-    // and leaves)
+    // to the ascending edge of each radix tree internal node
     int *_edge_delta;
+    // Array to store the map between radix tree internal nodes
+    // and octree nodes
+    int *_octree_map;
 
     // Temporary arrays used for sorting
     int *_tmp_perm1;
     int *_tmp_perm2;
     int *_tmp_range;
-
-    // Pointer to current object copy in device memory
-    Btree *_d_this;
 };
+
+extern __constant__ Btree d_btree;
 
 __global__ void morton_encode(Points *points, uint32_t *codes);
 
