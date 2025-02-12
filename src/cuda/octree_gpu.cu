@@ -4,22 +4,20 @@
 
 #include <iostream>
 
-#define _BUILD_STACK_SIZE 32 // 2^1 + 2^2 + 2^3 + 1
+// At most 15 nodes can be visited by traversing
+// 3 levels of any subtree of the binary radix tree
+#define _BUILD_STACK_SIZE 16
 
 __global__ void _build_octree(Btree &btree, Octree &octree)
 {
-    // For each internal node and leaf node
-    // The parent of the current node is the closest ancestor k
-    // such that _edge_delta[k] > 0, in this case take the 
-    // k-th value of the scan of _edge_delta
-    // WARNING: requires storing btree nodes as pointers to parent
-    // building octree may require synchronization
-
-    // otherwise as follows
-
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= btree.get_num_internal() ||
         !btree.is_octree_node(idx)) return;
+
+    // TODO: can we avoid this?
+    if (idx == 0) {
+        octree.set_num_internal(btree.get_num_octree_nodes());
+    }
 
     // Stack used to traverse at most 3 levels
     int stack[_BUILD_STACK_SIZE];

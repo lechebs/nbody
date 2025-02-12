@@ -110,6 +110,12 @@ public:
     }
 
     __device__ __forceinline__
+    int get_num_octree_nodes()
+    {
+        return _octree_map[get_num_internal() - 1];
+    }
+
+    __device__ __forceinline__
     void set_left(int idx, int left, int parent_lcp, int lcp, bool is_leaf)
     {
         _set_child(_left, idx, left, parent_lcp, lcp, is_leaf);
@@ -125,6 +131,12 @@ public:
     void set_depth(int idx, int depth)
     {
         _depth[idx] = depth;
+    }
+
+    __device__ __forceinline__
+    void set_edge_delta(int idx, int edge_delta)
+    {
+        _edge_delta[idx] = edge_delta;
     }
 
     __device__ __forceinline__

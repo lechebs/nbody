@@ -85,6 +85,10 @@ __global__ void _build_radix_tree(uint32_t *codes, Btree &btree)
 
     // Filling tmp ranges used to later sort tree nodes
     btree.fill_tmp(first, first);
+    // edge_delta[0] needs to be set to 1, we can write
+    // all the other positions as well since later
+    // they'll be overwritten
+    btree.set_edge_delta(first, 1);
 
     int num_leaves = btree.get_num_leaves();
 
@@ -229,10 +233,7 @@ void Btree::compute_octree_map()
     thrust::exclusive_scan(thrust::device,
                            _edge_delta,
                            _edge_delta + get_num_internal(),
-                           _octree_map,
-                           // Making sure root is counted
-                           // as valid octree node
-                           1);
+                           _octree_map);
 }
 
 Btree::~Btree()
