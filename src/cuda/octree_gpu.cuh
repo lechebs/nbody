@@ -1,5 +1,9 @@
 #ifndef OCTREE_GPU_CUH
-#ifndef OCTREE_GPU_CUH
+#define OCTREE_GPU_CUH
+
+#include "btree_gpu.cuh"
+
+#include <iostream>
 
 // SoA to store the octree
 class Octree
@@ -8,7 +12,7 @@ public:
     // max_depth ~= btree_height / 3
     Octree(int max_depth);
 
-    void build();
+    void build(Btree &btree);
 
     ~Octree();
 
@@ -19,12 +23,24 @@ public:
     }
 
     __device__ __forceinline__
+    void set_num_children(int idx, int num_children)
+    {
+        _num_children[idx] = num_children;
+    }
+
+    __device__ __forceinline__
     void add_child(int parent, int child, bool is_leaf)
     {
-        _children[(parent << 3) + _num_children[parent]++] =
+        int num_children = _num_children[parent];
+
+        _children[num_children * _max_num_internal + parent] =
+        // TODO:: doesn't show noticeable difference
+        //_children[parent * 8 + num_children] =
             // Pointers to leaf nodes are offset by the
             // maximum number of internal nodes
             child + is_leaf * _max_num_internal;
+
+        _num_children[parent] = num_children + 1;
     }
 
 private:
@@ -37,9 +53,8 @@ private:
     // Array to store the number of children of each internal node
     int *_num_children;
 
-    // TODO: hold a pointer to the corresponding Btree object
-    // so that it doesn't get redundantly copied to gpu memory
-}
+    Octree *_d_this;
+};
 
 #endif
 
