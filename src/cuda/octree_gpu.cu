@@ -19,16 +19,19 @@ __global__ void _build_octree(Btree &btree, Octree &octree)
         octree.set_num_internal(btree.get_num_octree_nodes());
     }
 
+    int parent = btree.get_octree_node(idx);
+
+    octree.set_num_children(parent, 0);
+    octree.set_leaves_range(parent,
+                            btree.get_leaves_begin(idx),
+                            btree.get_leaves_end(idx));
+
     // Stack used to traverse at most 3 levels
     int stack[_BUILD_STACK_SIZE];
     // Points to first and last+1 element on the stack
     int start = 0;
     int end = 0;
-
     stack[end++] = idx;
-
-    int parent = btree.get_octree_node(idx);
-    octree.set_num_children(parent, 0);
 
     do {
         int bin_node = stack[start++];
@@ -63,6 +66,8 @@ Octree::Octree(int max_depth) : _max_depth(max_depth)
     // Allocating device memory to store octree nodes
     cudaMalloc(&_children, _max_num_internal * 8 * sizeof(int));
     cudaMalloc(&_num_children, _max_num_internal * sizeof(int));
+    cudaMalloc(&_leaves_begin, _max_num_internal * sizeof(int));
+    cudaMalloc(&_leaves_end, _max_num_internal * sizeof(int));
 
     // Allocating object copy in device memory
     cudaMalloc(&_d_this, sizeof(Octree));

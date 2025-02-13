@@ -9,21 +9,30 @@
 #include <thrust/scan.h>
 #include <thrust/gather.h>
 
+#include <cub/device/device_radix_sort.cuh>
+#include <cub/device/device_merge_sort.cuh>
+
 #include "utils_gpu.cuh"
 #include "btree_gpu.cuh"
 #include "octree_gpu.cuh"
 
-constexpr int NUM_POINTS = 2 << 17;
-
-void print_bits(uint32_t u)
-{
-    for (int i = 0; i < 32; ++i) {
-        printf("%d", (u >> (31 - i)) & 0x01);
-    }
+#define TIMER_START(start) cudaEventRecord(start);
+#define TIMER_STOP(msg, start, stop) {                   \
+    cudaEventRecord(stop);                               \
+    cudaEventSynchronize(stop);                          \
+    float ms;                                            \
+    cudaEventElapsedTime(&ms, start, stop);              \
+    std::cout << msg << ": " << ms << "ms" << std::endl; \
 }
+
+constexpr int NUM_POINTS = 2 << 17;
 
 int main()
 {
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
     thrust::host_vector<float> h_x(NUM_POINTS);
     thrust::host_vector<float> h_y(NUM_POINTS);
     thrust::host_vector<float> h_z(NUM_POINTS);
@@ -52,51 +61,71 @@ int main()
     morton_encode<<<NUM_POINTS / THREADS_PER_BLOCK, THREADS_PER_BLOCK>>>(
         d_points, thrust::raw_pointer_cast(&d_codes[0]));
 
-    // Sorting and removing duplicates
-    thrust::sort(d_codes.begin(), d_codes.end());
+    LessOp custom_op;
+    // Determine sort tmp storage size
+    void *d_sort_tmp = nullptr;
+    size_t sort_tmp_size;
+    cub::DeviceMergeSort::SortKeys(d_sort_tmp,
+                                   sort_tmp_size,
+                                   thrust::raw_pointer_cast(&d_codes[0]),
+                                   // thrust::raw_pointer_cast(&d_codes_sorted[0]),
+                                   NUM_POINTS,
+                                   custom_op);
+    // Allocate sort tmp storage
+    cudaMalloc(&d_sort_tmp, sort_tmp_size);
+    // Sorting
+    TIMER_START(start)
+    // Faster than DeviceRadixSort::SortKeys and thrust::sort
+    cub::DeviceMergeSort::SortKeys(d_sort_tmp,
+                                   sort_tmp_size,
+                                   thrust::raw_pointer_cast(&d_codes[0]),
+                                   // thrust::raw_pointer_cast(&d_codes_sorted[0]),
+                                   NUM_POINTS,
+                                   custom_op);
+    TIMER_STOP("sort-codes", start, stop)
+
+    /*
+    TIMER_START(start)
+    thrust::sort(d_codes_sorted.begin(), d_codes_sorted.end());
+    TIMER_STOP(start, stop)
+    */
+
     auto unique_end = thrust::unique(d_codes.begin(), d_codes.end());
     int num_unique_points = unique_end - d_codes.begin();
 
-    std::cout << "num_unique_points=" << num_unique_points << std::endl;
-
-    thrust::host_vector<uint32_t> h_unique_codes(d_codes);
-    for (int i = 0; i < 32 - 1; ++i) {
-        printf("%4d: %12u ", i, h_unique_codes[i]);
-        print_bits(h_unique_codes[i]);
-        printf("\n");
-    }
-
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
+    // std::cout << "num_unique_points=" << num_unique_points << std::endl;
 
     Btree h_btree(num_unique_points);
     // TODO: is it correct?
     // Octree h_octree(ceil(log2(num_unique_points) / 3) + 1)
     Octree h_octree(7);
 
-    cudaEventRecord(start);
+    TIMER_START(start)
     h_btree.build(thrust::raw_pointer_cast(&d_codes[0]));
+    TIMER_STOP("btree-build", start, stop)
+
     // WARNING: Perhaps sort octree instead?
     // Octree nodes are ~1/3 of the btree nodes,
     // sorting would be faster
+
+    TIMER_START(start)
     h_btree.sort_to_bfs_order();
+    TIMER_STOP("btree-sort", start, stop)
+
+    TIMER_START(start)
     h_btree.compute_octree_map();
+    TIMER_STOP("btree-scan", start, stop)
+
+    TIMER_START(start)
     h_octree.build(h_btree);
+    TIMER_STOP("octree-build", start, stop)
 
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-
-    // h_btree.print();
-
-    float ms;
-    cudaEventElapsedTime(&ms, start, stop);
-    std::cout << ms << "ms" << std::endl;
+    //h_btree.print();
+    //h_octree.print();
 
     std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;
 
     free(h_points);
-
     cudaFree(d_points);
 
     return 0;

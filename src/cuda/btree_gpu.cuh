@@ -16,7 +16,8 @@ public:
     Btree(int num_leaves);
 
     // Returns a pointer to the object copy in device memory
-    Btree *get_dev_ptr() {
+    Btree *get_dev_ptr()
+    {
         return _d_this;
     }
 
@@ -33,6 +34,8 @@ public:
     {
         std::vector<int> left(get_num_internal());
         std::vector<int> right(get_num_internal());
+        std::vector<int> begin(get_num_internal());
+        std::vector<int> end(get_num_internal());
         std::vector<int> depth(get_num_internal());
         std::vector<int> edge(get_num_internal());
         std::vector<int> map(get_num_internal());
@@ -44,6 +47,14 @@ public:
         cudaMemcpy(right.data(),
                    _right,
                    right.size() * sizeof(int),
+                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(begin.data(),
+                   _leaves_begin,
+                   begin.size() * sizeof(int),
+                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(end.data(),
+                   _leaves_end,
+                   end.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(depth.data(),
                    _depth,
@@ -60,8 +71,10 @@ public:
 
         for (int i = 0; i < get_num_internal(); ++i)
         {
-            printf("%2d: %2d - %2d - depth: %d - edge: %d - octree: %d\n",
-                   i, left[i], right[i], depth[i], edge[i], map[i]);
+            printf("%2d: %2d - %2d - depth: %d - edge: %d - "
+                   "octree: %2d - range: %2d %2d\n",
+                   i, left[i], right[i], depth[i], edge[i], map[i],
+                   begin[i], end[i]);
         }
     }
 
@@ -95,6 +108,18 @@ public:
     __device__ __forceinline__
     int get_right(int idx) {
         return _right[idx];
+    }
+
+    __device__ __forceinline__
+    int get_leaves_begin(int idx)
+    {
+        return _leaves_begin[idx];
+    }
+
+    __device__ __forceinline__
+    int get_leaves_end(int idx)
+    {
+        return _leaves_end[idx];
     }
 
     __device__ __forceinline__
@@ -137,6 +162,13 @@ public:
     void set_edge_delta(int idx, int edge_delta)
     {
         _edge_delta[idx] = edge_delta;
+    }
+
+    __device__ __forceinline__
+    void set_leaves_range(int idx, int begin, int end)
+    {
+        _leaves_begin[idx] = begin;
+        _leaves_end[idx] = end;
     }
 
     __device__ __forceinline__
@@ -188,6 +220,9 @@ private:
     // of the internal nodes
     int *_left;
     int *_right;
+    // Arrays to store the range of leaves covered by the internal nodes
+    int *_leaves_begin;
+    int *_leaves_end;
 
     // Array to depth of the internal nodes
     int *_depth;
@@ -198,10 +233,14 @@ private:
     // and octree nodes
     int *_octree_map;
 
-    // Temporary arrays used for sorting
+    // Data used to sort internal nodes
+    int *_tmp_sort;
+    size_t _tmp_sort_size;
+    LessOp _sort_op;
     int *_tmp_perm1;
     int *_tmp_perm2;
     int *_tmp_range;
+
 
     // Pointer to object copy in device memory
     Btree *_d_this;

@@ -62,6 +62,13 @@ public:
     }
 
     __device__ __forceinline__
+    void set_leaves_range(int idx, int begin, int end)
+    {
+        _leaves_begin[idx] = begin;
+        _leaves_end[idx] = end;
+    }
+
+    __device__ __forceinline__
     void set_num_internal(int num_internal)
     {
         _num_internal = num_internal;
@@ -93,6 +100,9 @@ private:
     int *_children;
     // Array to store the number of children of each internal node
     int *_num_children;
+    // Arrays to store the range of leaves coverede by the internal nodes
+    int *_leaves_begin;
+    int *_leaves_end;
 
 
     Octree *_d_this;

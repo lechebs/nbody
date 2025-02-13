@@ -4,6 +4,8 @@
 #include <thrust/sort.h>
 #include <thrust/scatter.h>
 
+#include <cub/device/device_merge_sort.cuh>
+
 __device__ __forceinline__ uint32_t _expand_bits(uint32_t u)
 {
     u = (u * 0x00010001u) & 0xFF0000FFu;
@@ -146,6 +148,7 @@ __global__ void _build_radix_tree(uint32_t *codes, Btree &btree)
                     is_right_left);
 
     btree.set_depth(first, node_lcp / 3);
+    btree.set_leaves_range(first, min(first, last), max(first, last));
 }
 
 Btree::Btree(int num_leaves) : _num_leaves(num_leaves)
@@ -153,6 +156,8 @@ Btree::Btree(int num_leaves) : _num_leaves(num_leaves)
     // Allocating device memory for internal nodes
     cudaMalloc(&_left, get_num_internal() * sizeof(int));
     cudaMalloc(&_right, get_num_internal() * sizeof(int));
+    cudaMalloc(&_leaves_begin, get_num_internal() * sizeof(int));
+    cudaMalloc(&_leaves_end, get_num_internal() * sizeof(int));
     cudaMalloc(&_depth, get_num_internal() * sizeof(int));
     cudaMalloc(&_edge_delta, get_num_internal() * sizeof(int));
     cudaMalloc(&_octree_map, get_num_internal() * sizeof(int));
@@ -161,6 +166,23 @@ Btree::Btree(int num_leaves) : _num_leaves(num_leaves)
     cudaMalloc(&_tmp_range, get_num_internal() * sizeof(int));
     cudaMalloc(&_tmp_perm1, get_num_internal() * sizeof(int));
     cudaMalloc(&_tmp_perm2, get_num_internal() * sizeof(int));
+
+    // Allocating tmp array for cub sorting
+    _tmp_sort = nullptr;
+    cub::DeviceMergeSort::StableSortPairs(
+        _tmp_sort,
+        _tmp_sort_size,
+        _depth,
+        thrust::make_zip_iterator(
+            thrust::device_pointer_cast(_left),
+            thrust::device_pointer_cast(_right),
+            thrust::device_pointer_cast(_leaves_begin),
+            thrust::device_pointer_cast(_leaves_end),
+            thrust::device_pointer_cast(_edge_delta),
+            thrust::device_pointer_cast(_tmp_perm1)),
+        get_num_internal(),
+        _sort_op);
+    cudaMalloc(&_tmp_sort, _tmp_sort_size);
 
     // Allocating object copy in device memory
     cudaMalloc(&_d_this, sizeof(Btree));
@@ -198,18 +220,25 @@ __global__ void _correct_child_pointers(int *left,
 void Btree::sort_to_bfs_order()
 {
     // Sort arrays by depth
-    thrust::stable_sort_by_key(
-        thrust::device,
+
+    // TODO: custom sort?
+    cub::DeviceMergeSort::StableSortPairs(
+        _tmp_sort,
+        _tmp_sort_size,
         _depth,
-        _depth + get_num_internal(),
-        // Consider using device_vector for all arrays
+        // TODO: avoid creating zip_iterator on the fly
         thrust::make_zip_iterator(
             thrust::device_pointer_cast(_left),
             thrust::device_pointer_cast(_right),
+            thrust::device_pointer_cast(_leaves_begin),
+            thrust::device_pointer_cast(_leaves_end),
             thrust::device_pointer_cast(_edge_delta),
-            thrust::device_pointer_cast(_tmp_perm1)));
+            thrust::device_pointer_cast(_tmp_perm1)),
+        get_num_internal(),
+        _sort_op);
 
     // Reverse _tmp_perm1 mapping into _tmp_perm2
+    // TODO: find a way to perform it using cub
     thrust::scatter(thrust::device,
                     _tmp_range,
                     _tmp_range + get_num_internal(),
@@ -227,9 +256,10 @@ void Btree::sort_to_bfs_order()
 void Btree::compute_octree_map()
 {
     // Given an internal node i, if _edge_delta[i] > 0
-    // or i is the root, _octree_map[i] will contain
-    // the index of the corresponding octree node
+    // _octree_map[i] will contain the index of the
+    // corresponding octree node
 
+    // TODO: use cub::DeviceScan
     thrust::exclusive_scan(thrust::device,
                            _edge_delta,
                            _edge_delta + get_num_internal(),
@@ -241,8 +271,14 @@ Btree::~Btree()
     // Releasing device memory
     cudaFree(_left);
     cudaFree(_right);
+    cudaFree(_leaves_begin);
+    cudaFree(_leaves_end);
     cudaFree(_depth);
     cudaFree(_edge_delta);
     cudaFree(_octree_map);
+    cudaFree(_tmp_sort);
+    cudaFree(_tmp_perm1);
+    cudaFree(_tmp_perm2);
+    cudaFree(_tmp_range);
     cudaFree(_d_this);
 }

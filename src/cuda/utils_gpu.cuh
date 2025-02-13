@@ -32,5 +32,15 @@ private:
     float *_z;
 };
 
+
+struct LessOp
+{
+  template <typename DataType>
+  __device__ bool operator()(const DataType &lhs, const DataType &rhs)
+  {
+    return lhs < rhs;
+  }
+};
+
 #endif
 
