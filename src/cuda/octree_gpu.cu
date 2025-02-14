@@ -54,17 +54,40 @@ __global__ void _build_octree(Btree &btree, Octree &octree)
     } while (start != end);
 }
 
-__global__ void _compute_octree_nodes_barycenter(Points &points,
+__global__ void _compute_octree_nodes_barycenter(Points *points,
+                                                 Points *scan_points,
+                                                 int *scan_codes_occurrences,
                                                  Octree &octree)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= octree.get_num_internal()) return;
 
-    // Get leaves range, use them to index the prefix sum of
-    // the run-length-encoded occurences array of the sorted codes,
-    // obtaining indices i and j
+    int leaves_begin = octree.get_leaves_begin(idx);
+    int leaves_end = octree.get_leaves_end(idx);
 
-    // scan_x[j] - scan_x[i] gives the x coordinate of the barycenter
+    int begin_idx = scan_codes_occurrences[leaves_begin];
+    int end_idx = scan_codes_occurrences[leaves_end];
+
+    float x_barycenter = scan_points->get_x(end_idx) -
+                         scan_points->get_x(begin_idx) +
+                         points->get_x(end_idx);
+
+    float y_barycenter = scan_points->get_y(end_idx) -
+                         scan_points->get_y(begin_idx) +
+                         points->get_y(end_idx);
+
+    float z_barycenter = scan_points->get_z(end_idx) -
+                         scan_points->get_z(begin_idx) +
+                         points->get_z(end_idx);
+
+    // Works when all points have unit mass
+    float mass_sum = end_idx - begin_idx + 1;
+
+    x_barycenter /= mass_sum;
+    y_barycenter /= mass_sum;
+    z_barycenter /= mass_sum;
+
+    octree.set_barycenter(idx, x_barycenter, y_barycenter, z_barycenter);
 
     // When dealing with different masses, multiply the x array 
     // with the mass array and then compute the prefix sum
@@ -86,6 +109,9 @@ Octree::Octree(int max_depth) : _max_depth(max_depth)
     cudaMalloc(&_num_children, _max_num_internal * sizeof(int));
     cudaMalloc(&_leaves_begin, _max_num_internal * sizeof(int));
     cudaMalloc(&_leaves_end, _max_num_internal * sizeof(int));
+    cudaMalloc(&_x_barycenter, _max_num_internal * sizeof(float));
+    cudaMalloc(&_y_barycenter, _max_num_internal * sizeof(float));
+    cudaMalloc(&_z_barycenter, _max_num_internal * sizeof(float));
 
     // Allocating object copy in device memory
     cudaMalloc(&_d_this, sizeof(Octree));
@@ -99,16 +125,26 @@ void Octree::build(Btree &btree)
                     THREADS_PER_BLOCK>>>(*btree.get_dev_ptr(), *_d_this);
 }
 
-void Octree::compute_nodes_barycenter(Points &points)
+void Octree::compute_nodes_barycenter(Points *points,
+                                      Points *scan_points,
+                                      int *scan_codes_occurrences)
 {
     _compute_octree_nodes_barycenter<<<
         _max_num_internal / THREADS_PER_BLOCK +
         (_max_num_internal % THREADS_PER_BLOCK > 0),
-        THREADS_PER_BLOCK>>>(points, *_d_this);
+        THREADS_PER_BLOCK>>>(points,
+                             scan_points,
+                             scan_codes_occurrences,
+                             *_d_this);
 }
 
 Octree::~Octree()
 {
     cudaFree(_children);
     cudaFree(_num_children);
+    cudaFree(_leaves_begin);
+    cudaFree(_leaves_end);
+    cudaFree(_x_barycenter);
+    cudaFree(_y_barycenter);
+    cudaFree(_z_barycenter);
 }

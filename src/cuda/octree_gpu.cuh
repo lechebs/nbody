@@ -19,7 +19,9 @@ public:
 
     void build(Btree &btree);
 
-    void compute_nodes_barycenter(Points &points);
+    void compute_nodes_barycenter(Points *points,
+                                  Points *scan_points,
+                                  int *scan_codes_occurrences);
 
     void print()
     {
@@ -65,6 +67,18 @@ public:
     }
 
     __device__ __forceinline__
+    int get_leaves_begin(int idx)
+    {
+        return _leaves_begin[idx];
+    }
+
+    __device__ __forceinline__
+    int get_leaves_end(int idx)
+    {
+        return _leaves_end[idx];
+    }
+
+    __device__ __forceinline__
     void set_num_children(int idx, int num_children)
     {
         _num_children[idx] = num_children;
@@ -81,6 +95,14 @@ public:
     void set_num_internal(int num_internal)
     {
         _num_internal = num_internal;
+    }
+
+    __device__ __forceinline__
+    void set_barycenter(int idx, float x, float y, float z)
+    {
+        _x_barycenter[idx] = x;
+        _y_barycenter[idx] = y;
+        _z_barycenter[idx] = z;
     }
 
     __device__ __forceinline__

@@ -51,11 +51,12 @@ int main()
     thrust::device_vector<float> d_y(h_y);
     thrust::device_vector<float> d_z(h_z);
     float *d_x_ptr = thrust::raw_pointer_cast(&d_x[0]);
-    float *d_y_ptr = thrust::raw_pointer_cast(&d_x[1]);
-    float *d_z_ptr = thrust::raw_pointer_cast(&d_x[2]);
+    float *d_y_ptr = thrust::raw_pointer_cast(&d_y[0]);
+    float *d_z_ptr = thrust::raw_pointer_cast(&d_z[0]);
+
     // Initializes points SoA and copy to device
-    Points *h_points = new Points(d_x_ptr, d_y_ptr, d_z_ptr);
-    Points *d_points = alloc_device_soa(h_points, sizeof(Points));
+    Points h_points(d_x_ptr, d_y_ptr, d_z_ptr);
+    Points *d_points = alloc_device_soa(&h_points, sizeof(Points));
 
     // Allocate device memory to store morton codes
     thrust::device_vector<uint32_t> d_codes(NUM_POINTS);
@@ -164,27 +165,32 @@ int main()
     thrust::device_vector<float> d_scan_x(NUM_POINTS);
     thrust::device_vector<float> d_scan_y(NUM_POINTS);
     thrust::device_vector<float> d_scan_z(NUM_POINTS);
+    float *d_scan_x_ptr = thrust::raw_pointer_cast(&d_scan_x[0]);
+    float *d_scan_y_ptr = thrust::raw_pointer_cast(&d_scan_y[0]);
+    float *d_scan_z_ptr = thrust::raw_pointer_cast(&d_scan_z[0]);
 
     TIMER_START(start)
     // TODO: parallelize over multiple streams?
     cub::DeviceScan::ExclusiveSum(d_scan_tmp,
                                   scan_tmp_size,
                                   d_x_ptr,
-                                  thrust::raw_pointer_cast(&d_scan_x[0]),
+                                  d_scan_x_ptr,
                                   NUM_POINTS);
     cub::DeviceScan::ExclusiveSum(d_scan_tmp,
                                   scan_tmp_size,
                                   d_y_ptr,
-                                  thrust::raw_pointer_cast(&d_scan_y[0]),
+                                  d_scan_y_ptr,
                                   NUM_POINTS);
     cub::DeviceScan::ExclusiveSum(d_scan_tmp,
                                   scan_tmp_size,
                                   d_z_ptr,
-                                  thrust::raw_pointer_cast(&d_scan_z[0]),
+                                  d_scan_z_ptr,
                                   NUM_POINTS);
-    TIMER_STOP("points-scan", start, stop);
-
+    TIMER_STOP("points-scan", start, stop)
     cudaFree(d_scan_tmp);
+
+    Points h_scan_points(d_scan_x_ptr, d_scan_y_ptr, d_scan_z_ptr);
+    Points *d_scan_points = alloc_device_soa(&h_scan_points, sizeof(Points));
 
     // TODO: is it correct?
     // Octree h_octree(ceil(log2(num_unique_points) / 3) + 1)
@@ -210,13 +216,19 @@ int main()
     h_octree.build(h_btree);
     TIMER_STOP("octree-build", start, stop)
 
+    TIMER_START(start)
+    h_octree.compute_nodes_barycenter(d_points,
+                                      d_scan_points,
+                                      d_scan_codes_occurrences_ptr);
+    TIMER_STOP("octree-barycenters", start, stop)
+
     //h_btree.print();
     //h_octree.print();
 
     std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;
 
-    free(h_points);
     cudaFree(d_points);
+    cudaFree(d_scan_points);
 
     return 0;
 }
