@@ -21,6 +21,14 @@ public:
         return _d_this;
     }
 
+    // Returns a pointer to the object copy _num_leaves
+    int *get_dev_num_leaves_ptr()
+    {
+        // TODO: make it more c++-ish
+       return (int *) ((char *) get_dev_ptr() +
+                       ((char *) this - (char *) &_num_leaves));
+    }
+
     // Builds the binary radix tree given the sorted morton encoded codes
     void build(uint32_t *d_sorted_codes);
 
@@ -205,7 +213,7 @@ private:
     {
         // Pointers to leaf nodes are offset by the
         // number of internal nodes
-        child += (_num_leaves - 1) * is_leaf;
+        child += get_num_internal() * is_leaf;
         dest[parent] = child;
         if (!is_leaf) {
             _compute_edge_delta(child, parent_lcp, child_lcp);
@@ -240,7 +248,6 @@ private:
     int *_tmp_perm1;
     int *_tmp_perm2;
     int *_tmp_range;
-
 
     // Pointer to object copy in device memory
     Btree *_d_this;

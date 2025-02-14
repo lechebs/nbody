@@ -9,8 +9,9 @@
 #include <thrust/scan.h>
 #include <thrust/gather.h>
 
-#include <cub/device/device_radix_sort.cuh>
+//#include <cub/device/device_radix_sort.cuh>
 #include <cub/device/device_merge_sort.cuh>
+#include <cub/device/device_run_length_encode.cuh>
 
 #include "utils_gpu.cuh"
 #include "btree_gpu.cuh"
@@ -57,9 +58,11 @@ int main()
 
     // Allocate device memory to store morton codes
     thrust::device_vector<uint32_t> d_codes(NUM_POINTS);
+    uint32_t *d_codes_ptr = thrust::raw_pointer_cast(&d_codes[0]);
+
     // Kernel launch to compute morton codes of points
-    morton_encode<<<NUM_POINTS / THREADS_PER_BLOCK, THREADS_PER_BLOCK>>>(
-        d_points, thrust::raw_pointer_cast(&d_codes[0]));
+    morton_encode<<<NUM_POINTS / THREADS_PER_BLOCK,
+                    THREADS_PER_BLOCK>>>(d_points, d_codes_ptr);
 
     LessOp custom_op;
     // Determine sort tmp storage size
@@ -67,8 +70,7 @@ int main()
     size_t sort_tmp_size;
     cub::DeviceMergeSort::SortKeys(d_sort_tmp,
                                    sort_tmp_size,
-                                   thrust::raw_pointer_cast(&d_codes[0]),
-                                   // thrust::raw_pointer_cast(&d_codes_sorted[0]),
+                                   d_codes_ptr,
                                    NUM_POINTS,
                                    custom_op);
     // Allocate sort tmp storage
@@ -78,30 +80,66 @@ int main()
     // Faster than DeviceRadixSort::SortKeys and thrust::sort
     cub::DeviceMergeSort::SortKeys(d_sort_tmp,
                                    sort_tmp_size,
-                                   thrust::raw_pointer_cast(&d_codes[0]),
-                                   // thrust::raw_pointer_cast(&d_codes_sorted[0]),
+                                   d_codes_ptr,
                                    NUM_POINTS,
                                    custom_op);
     TIMER_STOP("sort-codes", start, stop)
+    cudaFree(d_sort_tmp);
 
-    /*
+    // Allocating Btree for NUM_POINTS number of leaves,
+    // the actual number of leaves will be smaller
+    Btree h_btree(NUM_POINTS);
+
+    // Obtaining unique codes and counting occurrences
+    // using run-length encoding
+    thrust::device_vector<uint32_t> d_unique_codes(NUM_POINTS);
+    thrust::device_vector<int> d_codes_occurrences(NUM_POINTS);
+    uint32_t *d_unique_codes_ptr =
+        thrust::raw_pointer_cast(&d_unique_codes[0]);
+    int *d_codes_occurrences_ptr =
+        thrust::raw_pointer_cast(&d_codes_occurrences[0]);
+
+    // Btree device copy will store the actual number of leaves
+    int *d_num_unique_codes = h_btree.get_dev_num_leaves_ptr();
+
+    void *d_runlength_tmp = nullptr;
+    size_t runlength_tmp_size;
+    cub::DeviceRunLengthEncode::Encode(d_runlength_tmp,
+                                       runlength_tmp_size,
+                                       d_codes_ptr,
+                                       d_unique_codes_ptr,
+                                       d_codes_occurrences_ptr,
+                                       d_num_unique_codes,
+                                       NUM_POINTS);
+    cudaMalloc(&d_runlength_tmp, runlength_tmp_size);
+
     TIMER_START(start)
-    thrust::sort(d_codes_sorted.begin(), d_codes_sorted.end());
-    TIMER_STOP(start, stop)
-    */
+    cub::DeviceRunLengthEncode::Encode(d_runlength_tmp,
+                                       runlength_tmp_size,
+                                       d_codes_ptr,
+                                       d_unique_codes_ptr,
+                                       d_codes_occurrences_ptr,
+                                       d_num_unique_codes,
+                                       NUM_POINTS);
+    TIMER_STOP("run-length", start, stop)
+    cudaFree(d_runlength_tmp);
 
-    auto unique_end = thrust::unique(d_codes.begin(), d_codes.end());
-    int num_unique_points = unique_end - d_codes.begin();
+    int h_num_unique_codes;
+    cudaMemcpy(&h_num_unique_codes,
+               d_num_unique_codes,
+               sizeof(int),
+               cudaMemcpyDeviceToHost);
 
-    // std::cout << "num_unique_points=" << num_unique_points << std::endl;
+    std::cout << "num_unique_codes=" << h_num_unique_codes << std::endl;
 
-    Btree h_btree(num_unique_points);
+    // TODO: compute scan of d_codes_occurrences, x, y and z
+
     // TODO: is it correct?
     // Octree h_octree(ceil(log2(num_unique_points) / 3) + 1)
     Octree h_octree(7);
 
     TIMER_START(start)
-    h_btree.build(thrust::raw_pointer_cast(&d_codes[0]));
+    h_btree.build(d_unique_codes_ptr);
     TIMER_STOP("btree-build", start, stop)
 
     // WARNING: Perhaps sort octree instead?
