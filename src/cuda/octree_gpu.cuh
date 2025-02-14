@@ -2,6 +2,7 @@
 #define OCTREE_GPU_CUH
 
 #include "btree_gpu.cuh"
+#include "utils_gpu.cuh"
 
 #include <iostream>
 #include <vector>
@@ -17,6 +18,8 @@ public:
     Octree(int max_depth);
 
     void build(Btree &btree);
+
+    void compute_nodes_barycenter(Points &points);
 
     void print()
     {
@@ -53,6 +56,12 @@ public:
     bool is_leaf(int node)
     {
         return node >= _max_num_internal;
+    }
+
+    __device__ __forceinline__
+    int get_num_internal()
+    {
+        return _num_internal;
     }
 
     __device__ __forceinline__
@@ -100,10 +109,14 @@ private:
     int *_children;
     // Array to store the number of children of each internal node
     int *_num_children;
-    // Arrays to store the range of leaves coverede by the internal nodes
+    // Arrays to store the range of leaves covered by the internal nodes
     int *_leaves_begin;
     int *_leaves_end;
 
+    // Barycenter coordinates of the points within each node
+    float *_x_barycenter;
+    float *_y_barycenter;
+    float *_z_barycenter;
 
     Octree *_d_this;
 };

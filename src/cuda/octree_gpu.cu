@@ -1,6 +1,7 @@
 #include "octree_gpu.cuh"
 
 #include "btree_gpu.cuh"
+#include "utils_gpu.cuh"
 
 #include <iostream>
 
@@ -53,6 +54,23 @@ __global__ void _build_octree(Btree &btree, Octree &octree)
     } while (start != end);
 }
 
+__global__ void _compute_octree_nodes_barycenter(Points &points,
+                                                 Octree &octree)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= octree.get_num_internal()) return;
+
+    // Get leaves range, use them to index the prefix sum of
+    // the run-length-encoded occurences array of the sorted codes,
+    // obtaining indices i and j
+
+    // scan_x[j] - scan_x[i] gives the x coordinate of the barycenter
+
+    // When dealing with different masses, multiply the x array 
+    // with the mass array and then compute the prefix sum
+    // The prefix sum of the mass array needs to be computed as well
+}
+
 Octree::Octree(int max_depth) : _max_depth(max_depth)
 {
     _max_num_internal = 1;
@@ -79,6 +97,14 @@ void Octree::build(Btree &btree)
     _build_octree<<<btree.get_num_internal() / THREADS_PER_BLOCK +
                     (btree.get_num_internal() % THREADS_PER_BLOCK > 0),
                     THREADS_PER_BLOCK>>>(*btree.get_dev_ptr(), *_d_this);
+}
+
+void Octree::compute_nodes_barycenter(Points &points)
+{
+    _compute_octree_nodes_barycenter<<<
+        _max_num_internal / THREADS_PER_BLOCK +
+        (_max_num_internal % THREADS_PER_BLOCK > 0),
+        THREADS_PER_BLOCK>>>(points, *_d_this);
 }
 
 Octree::~Octree()
