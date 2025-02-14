@@ -12,6 +12,7 @@
 //#include <cub/device/device_radix_sort.cuh>
 #include <cub/device/device_merge_sort.cuh>
 #include <cub/device/device_run_length_encode.cuh>
+#include <cub/device/device_scan.cuh>
 
 #include "utils_gpu.cuh"
 #include "btree_gpu.cuh"
@@ -26,7 +27,7 @@
     std::cout << msg << ": " << ms << "ms" << std::endl; \
 }
 
-constexpr int NUM_POINTS = 2 << 17;
+constexpr int NUM_POINTS = 2 << 16;
 
 int main()
 {
@@ -49,11 +50,11 @@ int main()
     thrust::device_vector<float> d_x(h_x);
     thrust::device_vector<float> d_y(h_y);
     thrust::device_vector<float> d_z(h_z);
+    float *d_x_ptr = thrust::raw_pointer_cast(&d_x[0]);
+    float *d_y_ptr = thrust::raw_pointer_cast(&d_x[1]);
+    float *d_z_ptr = thrust::raw_pointer_cast(&d_x[2]);
     // Initializes points SoA and copy to device
-    Points *h_points = new Points(
-        thrust::raw_pointer_cast(&d_x[0]),
-        thrust::raw_pointer_cast(&d_y[0]),
-        thrust::raw_pointer_cast(&d_z[0]));
+    Points *h_points = new Points(d_x_ptr, d_y_ptr, d_z_ptr);
     Points *d_points = alloc_device_soa(h_points, sizeof(Points));
 
     // Allocate device memory to store morton codes
@@ -68,21 +69,27 @@ int main()
     // Determine sort tmp storage size
     void *d_sort_tmp = nullptr;
     size_t sort_tmp_size;
-    cub::DeviceMergeSort::SortKeys(d_sort_tmp,
-                                   sort_tmp_size,
-                                   d_codes_ptr,
-                                   NUM_POINTS,
-                                   custom_op);
+    cub::DeviceMergeSort::SortPairs(d_sort_tmp,
+                                    sort_tmp_size,
+                                    d_codes_ptr,
+                                    thrust::make_zip_iterator(d_x_ptr,
+                                                              d_y_ptr,
+                                                              d_z_ptr),
+                                    NUM_POINTS,
+                                    custom_op);
     // Allocate sort tmp storage
     cudaMalloc(&d_sort_tmp, sort_tmp_size);
     // Sorting
     TIMER_START(start)
     // Faster than DeviceRadixSort::SortKeys and thrust::sort
-    cub::DeviceMergeSort::SortKeys(d_sort_tmp,
-                                   sort_tmp_size,
-                                   d_codes_ptr,
-                                   NUM_POINTS,
-                                   custom_op);
+    cub::DeviceMergeSort::SortPairs(d_sort_tmp,
+                                    sort_tmp_size,
+                                    d_codes_ptr,
+                                    thrust::make_zip_iterator(d_x_ptr,
+                                                              d_y_ptr,
+                                                              d_z_ptr),
+                                    NUM_POINTS,
+                                    custom_op);
     TIMER_STOP("sort-codes", start, stop)
     cudaFree(d_sort_tmp);
 
@@ -130,9 +137,54 @@ int main()
                sizeof(int),
                cudaMemcpyDeviceToHost);
 
-    std::cout << "num_unique_codes=" << h_num_unique_codes << std::endl;
+    // Computing exclusive scan of d_codes_occurrences
+    thrust::device_vector<int> d_scan_codes_occurrences(NUM_POINTS);
+    int *d_scan_codes_occurrences_ptr =
+        thrust::raw_pointer_cast(&d_scan_codes_occurrences[0]);
 
-    // TODO: compute scan of d_codes_occurrences, x, y and z
+    void *d_scan_tmp = nullptr;
+    size_t scan_tmp_size;
+    cub::DeviceScan::ExclusiveSum(d_scan_tmp,
+                                  scan_tmp_size,
+                                  d_codes_occurrences_ptr,
+                                  d_scan_codes_occurrences_ptr,
+                                  NUM_POINTS);
+    cudaMalloc(&d_scan_tmp, scan_tmp_size);
+
+    TIMER_START(start)
+    cub::DeviceScan::ExclusiveSum(d_scan_tmp,
+                                  scan_tmp_size,
+                                  d_codes_occurrences_ptr,
+                                  d_scan_codes_occurrences_ptr,
+                                  NUM_POINTS);
+    TIMER_STOP("codes-scan", start, stop)
+
+    // We can use the same tmp storage to scan point coordinates
+    // as long as we're dealing with 32 bit floats
+    thrust::device_vector<float> d_scan_x(NUM_POINTS);
+    thrust::device_vector<float> d_scan_y(NUM_POINTS);
+    thrust::device_vector<float> d_scan_z(NUM_POINTS);
+
+    TIMER_START(start)
+    // TODO: parallelize over multiple streams?
+    cub::DeviceScan::ExclusiveSum(d_scan_tmp,
+                                  scan_tmp_size,
+                                  d_x_ptr,
+                                  thrust::raw_pointer_cast(&d_scan_x[0]),
+                                  NUM_POINTS);
+    cub::DeviceScan::ExclusiveSum(d_scan_tmp,
+                                  scan_tmp_size,
+                                  d_y_ptr,
+                                  thrust::raw_pointer_cast(&d_scan_y[0]),
+                                  NUM_POINTS);
+    cub::DeviceScan::ExclusiveSum(d_scan_tmp,
+                                  scan_tmp_size,
+                                  d_z_ptr,
+                                  thrust::raw_pointer_cast(&d_scan_z[0]),
+                                  NUM_POINTS);
+    TIMER_STOP("points-scan", start, stop);
+
+    cudaFree(d_scan_tmp);
 
     // TODO: is it correct?
     // Octree h_octree(ceil(log2(num_unique_points) / 3) + 1)
