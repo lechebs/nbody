@@ -13,7 +13,7 @@ class Btree
 {
 // TODO: consider converting to unsigned int
 public:
-    Btree(int num_leaves);
+    Btree(int max_num_leaves);
 
     // Returns a pointer to the object copy in device memory
     Btree *get_dev_ptr()
@@ -24,9 +24,7 @@ public:
     // Returns a pointer to the object copy _num_leaves
     int *get_dev_num_leaves_ptr()
     {
-        // TODO: make it more c++-ish
-       return (int *) ((char *) get_dev_ptr() +
-                       ((char *) this - (char *) &_num_leaves));
+        return _num_leaves;
     }
 
     // Builds the binary radix tree given the sorted morton encoded codes
@@ -40,13 +38,13 @@ public:
 
     void print()
     {
-        std::vector<int> left(get_num_internal());
-        std::vector<int> right(get_num_internal());
-        std::vector<int> begin(get_num_internal());
-        std::vector<int> end(get_num_internal());
-        std::vector<int> depth(get_num_internal());
-        std::vector<int> edge(get_num_internal());
-        std::vector<int> map(get_num_internal());
+        std::vector<int> left(get_max_num_internal());
+        std::vector<int> right(get_max_num_internal());
+        std::vector<int> begin(get_max_num_internal());
+        std::vector<int> end(get_max_num_internal());
+        std::vector<int> depth(get_max_num_internal());
+        std::vector<int> edge(get_max_num_internal());
+        std::vector<int> map(get_max_num_internal());
 
         cudaMemcpy(left.data(),
                    _left,
@@ -77,7 +75,7 @@ public:
                    map.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
 
-        for (int i = 0; i < get_num_internal(); ++i)
+        for (int i = 0; i < get_max_num_internal(); ++i)
         {
             printf("%2d: %2d - %2d - depth: %d - edge: %d - "
                    "octree: %2d - range: %2d %2d\n",
@@ -98,14 +96,19 @@ public:
         return _edge_delta[idx] > 0;
     }
 
-    __host__ __device__ __forceinline__
+    __device__ __forceinline__
     int get_num_leaves() {
-        return _num_leaves;
+        return *_num_leaves;
+    }
+
+    __device__ __forceinline__
+    int get_num_internal() {
+        return get_num_leaves() - 1;
     }
 
     __host__ __device__ __forceinline__
-    int get_num_internal() {
-        return get_num_leaves() - 1;
+    int get_max_num_internal() {
+        return _max_num_leaves - 1;
     }
 
     __device__ __forceinline__
@@ -220,9 +223,9 @@ private:
         }
     }
 
-    // Number of internal nodes is _num_leaves - 1
-    // TODO: const?
-    int _num_leaves;
+    int _max_num_leaves;
+    // Number of leaf nodes
+    int *_num_leaves;
 
     // Arrays to store pointers (indices) to left and right children
     // of the internal nodes

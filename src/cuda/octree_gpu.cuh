@@ -27,6 +27,9 @@ public:
     {
         std::vector<int> children(_max_num_internal * 8);
         std::vector<int> num_children(_max_num_internal);
+        std::vector<float> x_barycenter(_max_num_internal);
+        std::vector<float> y_barycenter(_max_num_internal);
+        std::vector<float> z_barycenter(_max_num_internal);
         int num_internal;
 
         cudaMemcpy(children.data(),
@@ -41,14 +44,27 @@ public:
                    &((*_d_this)._num_internal),
                    sizeof(int),
                    cudaMemcpyDeviceToHost);
+        cudaMemcpy(x_barycenter.data(),
+                   _x_barycenter,
+                   sizeof(float) * _max_num_internal,
+                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(y_barycenter.data(),
+                   _y_barycenter,
+                   sizeof(float) * _max_num_internal,
+                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(z_barycenter.data(),
+                   _z_barycenter,
+                   sizeof(float) * _max_num_internal,
+                   cudaMemcpyDeviceToHost);
 
-        for (int i = 0; i < num_internal; ++i)
+        for (int i = 0; i < 10; ++i)
         {
             printf("%2d: [", i);
             for (int j = 0; j < num_children[i]; ++j) {
                 printf(" %2d", children[j * _max_num_internal + i]);
             }
-            printf("]\n");
+            printf("] - barycenter: (%.3f, %.3f, %.3f)\n",
+                   x_barycenter[i], y_barycenter[i], z_barycenter[i]);
         }
     }
 

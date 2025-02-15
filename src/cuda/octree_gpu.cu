@@ -120,8 +120,8 @@ Octree::Octree(int max_depth) : _max_depth(max_depth)
 
 void Octree::build(Btree &btree)
 {
-    _build_octree<<<btree.get_num_internal() / THREADS_PER_BLOCK +
-                    (btree.get_num_internal() % THREADS_PER_BLOCK > 0),
+    _build_octree<<<btree.get_max_num_internal() / THREADS_PER_BLOCK +
+                    (btree.get_max_num_internal() % THREADS_PER_BLOCK > 0),
                     THREADS_PER_BLOCK>>>(*btree.get_dev_ptr(), *_d_this);
 }
 

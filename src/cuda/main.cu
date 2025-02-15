@@ -27,7 +27,7 @@
     std::cout << msg << ": " << ms << "ms" << std::endl; \
 }
 
-constexpr int NUM_POINTS = 2 << 16;
+constexpr int NUM_POINTS = 2 << 15;
 
 int main()
 {
@@ -40,11 +40,12 @@ int main()
     thrust::host_vector<float> h_z(NUM_POINTS);
 
     thrust::default_random_engine rng(100);
-    thrust::uniform_real_distribution<float> dist;
+    //thrust::uniform_real_distribution<float> dist;
+    thrust::random::normal_distribution<float> dist(0.5, 0.125);
 
-    thrust::generate(h_x.begin(), h_x.end(), [&] { return dist(rng); });
-    thrust::generate(h_y.begin(), h_y.end(), [&] { return dist(rng); });
-    thrust::generate(h_z.begin(), h_z.end(), [&] { return dist(rng); });
+    thrust::generate(h_x.begin(), h_x.end(), [&] { return max(0.f, min(1.f, dist(rng))); });
+    thrust::generate(h_y.begin(), h_y.end(), [&] { return max(0.f, min(1.f, dist(rng))); });
+    thrust::generate(h_z.begin(), h_z.end(), [&] { return max(0.f, min(1.f, dist(rng))); });
 
     // Allocate device memory to store points coordinates
     thrust::device_vector<float> d_x(h_x);
@@ -107,7 +108,7 @@ int main()
     int *d_codes_occurrences_ptr =
         thrust::raw_pointer_cast(&d_codes_occurrences[0]);
 
-    // Btree device copy will store the actual number of leaves
+    // WARNING: Only Btree device copy will store the actual number of leaves
     int *d_num_unique_codes = h_btree.get_dev_num_leaves_ptr();
 
     void *d_runlength_tmp = nullptr;
@@ -194,7 +195,7 @@ int main()
 
     // TODO: is it correct?
     // Octree h_octree(ceil(log2(num_unique_points) / 3) + 1)
-    Octree h_octree(7);
+    Octree h_octree(8);
 
     TIMER_START(start)
     h_btree.build(d_unique_codes_ptr);
@@ -222,8 +223,10 @@ int main()
                                       d_scan_codes_occurrences_ptr);
     TIMER_STOP("octree-barycenters", start, stop)
 
-    //h_btree.print();
-    //h_octree.print();
+    // h_btree.print();
+    h_octree.print();
+
+    std::cout << "num_unique_codes=" << h_num_unique_codes << std::endl;
 
     std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;
 
