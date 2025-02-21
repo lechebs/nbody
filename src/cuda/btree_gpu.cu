@@ -1,8 +1,10 @@
 #include "btree_gpu.cuh"
 
+#include <thrust/device_vector.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <thrust/scatter.h>
+#include <thrust/gather.h>
 #include <thrust/sequence.h>
 
 #include <cub/device/device_merge_sort.cuh>
@@ -114,7 +116,6 @@ __device__ int _search_lr(uint32_t *codes,
 
 __global__ void _reduce_leaf_depth(uint32_t *codes,
                                    int *leaf_depth,
-                                   int *tmp_range,
                                    int *num_leaves)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -129,31 +130,35 @@ __global__ void _reduce_leaf_depth(uint32_t *codes,
 __global__ void _merge_leaves(uint32_t *codes,
                               int *leaf_depth_in,
                               int *leaf_depth_out,
-                              int *leaf_first,
+                              int *leaf_first_in,
+                              int *leaf_first_out,
                               int *leaf_flagged,
                               int max_num_codes_per_leaf,
                               int *num_leaves,
                               int max_num_leaves)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= max_num_leaves) {
+    if (idx > max_num_leaves) {
         return;
     }
 
     // Making sure unused array rear contains 0, since
     // compaction will be called using max_num_leaves as size
     leaf_flagged[idx] = 0;
+    leaf_first_out[idx] = *num_leaves;
 
     if (idx >= *num_leaves) {
         return;
     }
+
+    leaf_first_out[idx] = idx;
 
     int left_old;
     int left = 0;
     int right = 0;
     int depth_delta = 0;
 
-    int num_codes = leaf_first[idx + 1] - leaf_first[idx];
+    int num_codes = leaf_first_in[idx + 1] - leaf_first_in[idx];
 
     // Attempts to raise a leaf to a smaller depth
     while (num_codes <= max_num_codes_per_leaf) {
@@ -166,12 +171,13 @@ __global__ void _merge_leaves(uint32_t *codes,
         right = _search_lr(
             codes, leaf_depth_in, 1, idx, depth_delta, *num_leaves);
         // Number of codes contained in the candidate merged leaf
-        num_codes = leaf_first[idx + right + 1] - leaf_first[idx - left];
+        num_codes = leaf_first_in[idx + right + 1] -
+                    leaf_first_in[idx - left];
     }
 
     // Reduce delta_depth since the merge proposal
     // from the last iterations is always rejected
-    leaf_depth_out[idx] -= max(0, depth_delta - 1);
+    leaf_depth_out[idx] = leaf_depth_in[idx] - max(0, depth_delta - 1);
     // Keeping only leaf entries at the start of each merged leaf
     leaf_flagged[idx] = left_old == 0;
 }
@@ -280,8 +286,7 @@ Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
     // Allocating device memory for leaf nodes
     cudaMalloc(&_leaf_depth1, max_num_leaves * sizeof(int));
     cudaMalloc(&_leaf_depth2, max_num_leaves * sizeof(int));
-    cudaMalloc(&_leaf_flagged, max_num_leaves * sizeof(int));
-    cudaMalloc(&_leaf_first, (max_num_leaves + 1) * sizeof(int));
+    cudaMalloc(&_leaf_flagged, (max_num_leaves + 1) * sizeof(int));
     cudaMalloc(&_leaf_tmp_range, (max_num_leaves + 1) * sizeof(int));
     // Allocating device memory for internal nodes
     cudaMalloc(&_left, get_max_num_internal() * sizeof(int));
@@ -318,9 +323,9 @@ Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
                                   _tmp_compact_size,
                                   _leaf_tmp_range,
                                   _leaf_flagged,
-                                  _leaf_first,
+                                  _leaf_tmp_range,
                                   _num_leaves,
-                                  max_num_leaves);
+                                  max_num_leaves + 1);
     cudaMalloc(&_tmp_compact, _tmp_compact_size);
 
     // Allocating object copy in device memory
@@ -333,6 +338,7 @@ Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
 }
 
 void Btree::generate_leaves(uint32_t *d_sorted_codes,
+                            int *d_leaf_first_code,
                             int max_num_codes_per_leaf)
 {
     // Sets the initial depth (octree relative) of each leaf
@@ -341,17 +347,20 @@ void Btree::generate_leaves(uint32_t *d_sorted_codes,
                          (_max_num_leaves % THREADS_PER_BLOCK > 0),
                          THREADS_PER_BLOCK>>>(d_sorted_codes,
                                               _leaf_depth1,
-                                              _leaf_tmp_range,
                                               _num_leaves);
+
+    static thrust::device_vector<int> tmp_range_out(_max_num_leaves + 1);
 
     // Merges adjacent leaves until each holds no more than
     // max_num_codes_per_leaf codes
-    _merge_leaves<<<_max_num_leaves / THREADS_PER_BLOCK +
-                    (_max_num_leaves % THREADS_PER_BLOCK > 0),
+    _merge_leaves<<<(_max_num_leaves + 1) / THREADS_PER_BLOCK +
+                    ((_max_num_leaves + 1) % THREADS_PER_BLOCK > 0),
                     THREADS_PER_BLOCK>>>(d_sorted_codes,
                                          _leaf_depth1,
                                          _leaf_depth2,
                                          _leaf_tmp_range,
+                                         thrust::raw_pointer_cast(
+                                            &tmp_range_out[0]),
                                          _leaf_flagged,
                                          max_num_codes_per_leaf,
                                          _num_leaves,
@@ -360,18 +369,31 @@ void Btree::generate_leaves(uint32_t *d_sorted_codes,
     // Keeping only the first code of each merged leaf
     cub::DevicePartition::Flagged(_tmp_compact,
                                   _tmp_compact_size,
-                                  _leaf_tmp_range,
+                                  thrust::raw_pointer_cast(
+                                    &tmp_range_out[0]),
                                   _leaf_flagged,
-                                  _leaf_first,
+                                  d_leaf_first_code,
                                   _num_leaves,
-                                  _max_num_leaves);
+                                  _max_num_leaves + 1);
 }
 
-void Btree::build(uint32_t *d_sorted_codes)
+void Btree::build(uint32_t *d_sorted_codes, int *d_leaf_first_code)
 {
+    static thrust::device_vector<uint32_t> d_leaf_codes(_max_num_leaves);
+
+    // WARNING: watch out when gathering values from
+    // the rear of d_leaf_first_code
+    thrust::gather(thrust::device,
+                   d_leaf_first_code,
+                   d_leaf_first_code + _max_num_leaves,
+                   d_sorted_codes,
+                   d_leaf_codes.begin());
+
     _build_radix_tree<<<get_max_num_internal() / THREADS_PER_BLOCK +
                         (get_max_num_internal() % THREADS_PER_BLOCK > 0),
-                        THREADS_PER_BLOCK>>>(d_sorted_codes, *_d_this);
+                        THREADS_PER_BLOCK>>>(
+                            thrust::raw_pointer_cast(&d_leaf_codes[0]),
+                            *_d_this);
 }
 
 // TODO: sorting is costly, compare the traversal
@@ -435,7 +457,6 @@ Btree::~Btree()
     cudaFree(_leaf_flagged);
     cudaFree(_leaf_tmp_range);
     cudaFree(_tmp_compact);
-    cudaFree(_leaf_first);
 
     cudaFree(_left);
     cudaFree(_right);

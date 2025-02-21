@@ -7,7 +7,7 @@
 
 // At most 15 nodes can be visited by traversing
 // 3 levels of any subtree of the binary radix tree
-#define _BUILD_STACK_SIZE 16
+#define _BUILD_QUEUE_SIZE 16
 
 __global__ void _build_octree(Btree &btree, Octree &octree)
 {
@@ -27,15 +27,15 @@ __global__ void _build_octree(Btree &btree, Octree &octree)
                             btree.get_leaves_begin(idx),
                             btree.get_leaves_end(idx));
 
-    // Stack used to traverse at most 3 levels
-    int stack[_BUILD_STACK_SIZE];
+    // Queue used to traverse at most 3 levels
+    int queue[_BUILD_QUEUE_SIZE];
     // Points to first and last+1 element on the stack
     int start = 0;
     int end = 0;
-    stack[end++] = idx;
+    queue[end++] = idx;
 
     do {
-        int bin_node = stack[start++];
+        int bin_node = queue[start++];
         int is_leaf = btree.is_leaf(bin_node);
 
         if (bin_node != idx &&
@@ -47,8 +47,8 @@ __global__ void _build_octree(Btree &btree, Octree &octree)
             octree.add_child(parent, child, is_leaf);
 
         } else {
-            stack[end++] = btree.get_left(bin_node);
-            stack[end++] = btree.get_right(bin_node);
+            queue[end++] = btree.get_left(bin_node);
+            queue[end++] = btree.get_right(bin_node);
         }
 
     } while (start != end);
@@ -56,6 +56,7 @@ __global__ void _build_octree(Btree &btree, Octree &octree)
 
 __global__ void _compute_octree_nodes_barycenter(Points *points,
                                                  Points *scan_points,
+                                                 int *leaf_first_code,
                                                  int *scan_codes_occurrences,
                                                  Octree &octree)
 {
@@ -65,23 +66,26 @@ __global__ void _compute_octree_nodes_barycenter(Points *points,
     int leaves_begin = octree.get_leaves_begin(idx);
     int leaves_end = octree.get_leaves_end(idx);
 
-    int begin_idx = scan_codes_occurrences[leaves_begin];
-    int end_idx = scan_codes_occurrences[leaves_end];
+    int codes_begin = leaf_first_code[leaves_begin];
+    int codes_end = leaf_first_code[leaves_end + 1] - 1;
 
-    float x_barycenter = scan_points->get_x(end_idx) -
-                         scan_points->get_x(begin_idx) +
-                         points->get_x(end_idx);
+    int points_begin = scan_codes_occurrences[codes_begin];
+    int points_end = scan_codes_occurrences[codes_end];
 
-    float y_barycenter = scan_points->get_y(end_idx) -
-                         scan_points->get_y(begin_idx) +
-                         points->get_y(end_idx);
+    float x_barycenter = scan_points->get_x(points_end) -
+                         scan_points->get_x(points_begin) +
+                         points->get_x(points_end);
 
-    float z_barycenter = scan_points->get_z(end_idx) -
-                         scan_points->get_z(begin_idx) +
-                         points->get_z(end_idx);
+    float y_barycenter = scan_points->get_y(points_end) -
+                         scan_points->get_y(points_begin) +
+                         points->get_y(points_end);
+
+    float z_barycenter = scan_points->get_z(points_end) -
+                         scan_points->get_z(points_begin) +
+                         points->get_z(points_end);
 
     // Works when all points have unit mass
-    float mass_sum = end_idx - begin_idx + 1;
+    float mass_sum = points_end - points_begin + 1;
 
     x_barycenter /= mass_sum;
     y_barycenter /= mass_sum;
@@ -127,6 +131,7 @@ void Octree::build(Btree &btree)
 
 void Octree::compute_nodes_barycenter(Points *points,
                                       Points *scan_points,
+                                      int *leaf_first_code,
                                       int *scan_codes_occurrences)
 {
     _compute_octree_nodes_barycenter<<<
@@ -134,6 +139,7 @@ void Octree::compute_nodes_barycenter(Points *points,
         (_max_num_internal % THREADS_PER_BLOCK > 0),
         THREADS_PER_BLOCK>>>(points,
                              scan_points,
+                             leaf_first_code,
                              scan_codes_occurrences,
                              *_d_this);
 }

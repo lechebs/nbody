@@ -30,10 +30,11 @@ public:
     // Generates leaf nodes such that each contain no more than
     // max_num_points_per_leaf
     void generate_leaves(uint32_t *d_sorted_codes,
+                         int *d_leaf_first_code,
                          int max_num_codes_per_leaf);
 
     // Builds the binary radix tree given the sorted morton encoded codes
-    void build(uint32_t *d_sorted_codes);
+    void build(uint32_t *d_sorted_codes, int *d_leaf_first_code);
 
     // Sorts internal nodes by depth to allow efficient bfs traversal
     void sort_to_bfs_order();
@@ -240,9 +241,6 @@ private:
     // Storage used for leaves compaction
     int *_tmp_compact;
     size_t _tmp_compact_size;
-    // Array to store the index of the first code
-    // contained in each leaf
-    int *_leaf_first;
 
     // Arrays to store pointers (indices) to left and right children
     // of the internal nodes

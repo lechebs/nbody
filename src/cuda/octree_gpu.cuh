@@ -21,6 +21,7 @@ public:
 
     void compute_nodes_barycenter(Points *points,
                                   Points *scan_points,
+                                  int *leaf_first_code,
                                   int *scan_codes_occurrences);
 
     void print()

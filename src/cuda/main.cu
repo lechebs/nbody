@@ -27,8 +27,15 @@
     std::cout << msg << ": " << ms << "ms" << std::endl; \
 }
 
-constexpr int NUM_POINTS = 2 << 15;
-constexpr int MAX_CODES_PER_LEAF = 32;
+constexpr int NUM_POINTS = 2 << 8;
+constexpr int MAX_CODES_PER_LEAF = 16;
+
+void print_bits(uint32_t u)
+{
+    for (int i = 0; i < 32; ++i) {
+        printf("%d", (u >> (31 - i)) & 0x01);
+    }
+}
 
 int main()
 {
@@ -41,8 +48,8 @@ int main()
     thrust::host_vector<float> h_z(NUM_POINTS);
 
     thrust::default_random_engine rng(100);
-    //thrust::uniform_real_distribution<float> dist;
-    thrust::random::normal_distribution<float> dist(0.5, 0.125);
+    thrust::uniform_real_distribution<float> dist;
+    // thrust::random::normal_distribution<float> dist(0.5, 0.125);
 
     auto dist_gen = [&] { return max(0.0f, min(1.0f, dist(rng))); };
 
@@ -200,12 +207,32 @@ int main()
     // Octree h_octree(ceil(log2(num_unique_points) / 3) + 1)
     Octree h_octree(8);
 
-    TIMER_START(start)
-    h_btree.generate_leaves(d_unique_codes_ptr, MAX_CODES_PER_LEAF);
-    TIMER_STOP("btree-leaves", start, stop)
+    thrust::device_vector<int> d_leaf_first_code(NUM_POINTS + 1);
+    int *d_leaf_first_code_ptr =
+        thrust::raw_pointer_cast(&d_leaf_first_code[0]);
 
     TIMER_START(start)
-    h_btree.build(d_unique_codes_ptr);
+    h_btree.generate_leaves(d_unique_codes_ptr,
+                            d_leaf_first_code_ptr,
+                            MAX_CODES_PER_LEAF);
+    TIMER_STOP("btree-leaves", start, stop)
+
+    /*
+    thrust::host_vector<uint32_t> h_unique_codes(d_unique_codes);
+    for (int i = 0; i < 32; ++i) {
+        printf("%4d: %12u ", i, h_unique_codes[i]);
+        print_bits(h_unique_codes[i]);
+        printf("\n");
+    }
+
+    thrust::device_vector<int> h_leaf_first_code(d_leaf_first_code);
+    for (int i = 0; i < NUM_POINTS + 1; ++i) {
+        std::cout << "[" << i << "] " << h_leaf_first_code[i] << std::endl;
+    }
+    */
+
+    TIMER_START(start)
+    h_btree.build(d_unique_codes_ptr, d_leaf_first_code_ptr);
     TIMER_STOP("btree-build", start, stop)
 
     // WARNING: Perhaps sort octree instead?
@@ -227,6 +254,7 @@ int main()
     TIMER_START(start)
     h_octree.compute_nodes_barycenter(d_points,
                                       d_scan_points,
+                                      d_leaf_first_code_ptr,
                                       d_scan_codes_occurrences_ptr);
     TIMER_STOP("octree-barycenters", start, stop)
 
