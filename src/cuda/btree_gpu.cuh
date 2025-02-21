@@ -27,6 +27,11 @@ public:
         return _num_leaves;
     }
 
+    // Generates leaf nodes such that each contain no more than
+    // max_num_points_per_leaf
+    void generate_leaves(uint32_t *d_sorted_codes,
+                         int max_num_codes_per_leaf);
+
     // Builds the binary radix tree given the sorted morton encoded codes
     void build(uint32_t *d_sorted_codes);
 
@@ -224,8 +229,20 @@ private:
     }
 
     int _max_num_leaves;
-    // Number of leaf nodes
     int *_num_leaves;
+
+    // Arrays used to generate leaf nodes containing
+    // a given maximum number of codes (~points)
+    int *_leaf_depth1;
+    int *_leaf_depth2;
+    int *_leaf_flagged;
+    int *_leaf_tmp_range;
+    // Storage used for leaves compaction
+    int *_tmp_compact;
+    size_t _tmp_compact_size;
+    // Array to store the index of the first code
+    // contained in each leaf
+    int *_leaf_first;
 
     // Arrays to store pointers (indices) to left and right children
     // of the internal nodes
@@ -234,7 +251,6 @@ private:
     // Arrays to store the range of leaves covered by the internal nodes
     int *_leaves_begin;
     int *_leaves_end;
-
     // Array to depth of the internal nodes
     int *_depth;
     // Array to store the number of octree nodes that correspond

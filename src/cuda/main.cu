@@ -28,6 +28,7 @@
 }
 
 constexpr int NUM_POINTS = 2 << 15;
+constexpr int MAX_CODES_PER_LEAF = 32;
 
 int main()
 {
@@ -43,9 +44,11 @@ int main()
     //thrust::uniform_real_distribution<float> dist;
     thrust::random::normal_distribution<float> dist(0.5, 0.125);
 
-    thrust::generate(h_x.begin(), h_x.end(), [&] { return max(0.f, min(1.f, dist(rng))); });
-    thrust::generate(h_y.begin(), h_y.end(), [&] { return max(0.f, min(1.f, dist(rng))); });
-    thrust::generate(h_z.begin(), h_z.end(), [&] { return max(0.f, min(1.f, dist(rng))); });
+    auto dist_gen = [&] { return max(0.0f, min(1.0f, dist(rng))); };
+
+    thrust::generate(h_x.begin(), h_x.end(), dist_gen);
+    thrust::generate(h_y.begin(), h_y.end(), dist_gen);
+    thrust::generate(h_z.begin(), h_z.end(), dist_gen);
 
     // Allocate device memory to store points coordinates
     thrust::device_vector<float> d_x(h_x);
@@ -196,6 +199,10 @@ int main()
     // TODO: is it correct?
     // Octree h_octree(ceil(log2(num_unique_points) / 3) + 1)
     Octree h_octree(8);
+
+    TIMER_START(start)
+    h_btree.generate_leaves(d_unique_codes_ptr, MAX_CODES_PER_LEAF);
+    TIMER_STOP("btree-leaves", start, stop)
 
     TIMER_START(start)
     h_btree.build(d_unique_codes_ptr);
