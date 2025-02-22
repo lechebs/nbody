@@ -7,7 +7,7 @@
 
 // At most 15 nodes can be visited by traversing
 // 3 levels of any subtree of the binary radix tree
-#define _BUILD_QUEUE_SIZE 16
+#define _BUILD_STACK_SIZE 16
 
 __global__ void _build_octree(Btree &btree, Octree &octree)
 {
@@ -27,15 +27,14 @@ __global__ void _build_octree(Btree &btree, Octree &octree)
                             btree.get_leaves_begin(idx),
                             btree.get_leaves_end(idx));
 
-    // Queue used to traverse at most 3 levels
-    int queue[_BUILD_QUEUE_SIZE];
-    // Points to first and last+1 element on the stack
-    int start = 0;
+    // Stack used to traverse at most 3 levels
+    int stack[_BUILD_STACK_SIZE];
+    // Points to last+1 element on the stack
     int end = 0;
-    queue[end++] = idx;
+    stack[end++] = idx;
 
-    do {
-        int bin_node = queue[start++];
+    int bin_node = btree.get_left(idx);
+    while (end >= 0) {
         int is_leaf = btree.is_leaf(bin_node);
 
         if (bin_node != idx &&
@@ -46,12 +45,16 @@ __global__ void _build_octree(Btree &btree, Octree &octree)
 
             octree.add_child(parent, child, is_leaf);
 
-        } else {
-            queue[end++] = btree.get_left(bin_node);
-            queue[end++] = btree.get_right(bin_node);
-        }
+            end--;
+            if (end >= 0) {
+                bin_node = btree.get_right(stack[end]);
+            }
 
-    } while (start != end);
+        } else {
+            stack[end++] = bin_node;
+            bin_node = btree.get_left(bin_node);
+        }
+    }
 }
 
 __global__ void _compute_octree_nodes_barycenter(Points *points,
