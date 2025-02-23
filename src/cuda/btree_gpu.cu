@@ -183,7 +183,11 @@ __global__ void _merge_leaves(uint32_t *codes,
 }
 
 // TODO: consider passing directly the relevant arrays
-__global__ void _build_radix_tree(uint32_t *codes, Btree &btree)
+__global__ void _build_radix_tree(uint32_t *codes,
+                                  int *parent,
+                                  int *depth,
+                                  int *edge_delta,
+                                  Btree &btree)
 {
     int first = blockIdx.x * blockDim.x + threadIdx.x;
     int num_leaves = btree.get_num_leaves();
@@ -201,6 +205,8 @@ __global__ void _build_radix_tree(uint32_t *codes, Btree &btree)
     btree.fill_tmp(first, first);
     // The root node is a valid octree node
     if (first == 0) {
+        parent[first] = 0;
+        depth[first] = 0;
         btree.set_edge_delta(first, 1);
     }
 
@@ -255,8 +261,55 @@ __global__ void _build_radix_tree(uint32_t *codes, Btree &btree)
     btree.set_left(first, split, node_lcp, left_lcp, is_left_leaf);
     btree.set_right(first, split + 1, node_lcp, right_lcp, is_right_leaf);
 
-    btree.set_depth(first, node_lcp / 3);
+    // TODO: prefill parent array with 0s
+
+    if (!is_left_leaf) {
+        depth[split] = edge_delta[split];
+        parent[split] = first;
+    }
+    if (!is_right_leaf) {
+        depth[split + 1] = edge_delta[split + 1];
+        parent[split + 1] = first;
+    }
+
+    // btree.set_depth(first, node_lcp / 3);
+    // printf("[%2d] node_lcp=%d\n", first, node_lcp);
     btree.set_leaves_range(first, min_leaf, max_leaf);
+}
+
+__global__ void _compute_nodes_depth(int *parent, int *depth, int *num_leaves)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= *num_leaves - 1) {
+        return;
+    }
+
+    int parent_idx = parent[idx];
+    int curr_depth = depth[idx];
+    // If parent is not the root
+    if (parent_idx && curr_depth > 0) {
+        depth[idx] = curr_depth + depth[parent_idx];
+        parent[idx] = parent[parent_idx];
+    }
+}
+
+__global__ void _copy_parent_depth(int *parent,
+                                   int *depth,
+                                   int *edge_delta,
+                                   int *num_leaves)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= *num_leaves - 1) {
+        return;
+    }
+
+    int curr_idx = idx;
+    while (edge_delta[curr_idx] == 0) {
+        curr_idx = parent[curr_idx];
+    }
+
+    // printf("%2d -> %2d\n", idx, curr_idx);
+    depth[idx] = depth[curr_idx];
 }
 
 // Used to update pointers to children after sorting the nodes
@@ -267,7 +320,10 @@ __global__ void _correct_child_pointers(int *left,
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int num_internal = btree.get_num_internal();
-    if (idx >= num_internal) return;
+
+    if (idx >= num_internal) {
+        return;
+    }
 
     int left_value = left[idx];
     int right_value = right[idx];
@@ -289,6 +345,8 @@ Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
     cudaMalloc(&_leaf_flagged, (max_num_leaves + 1) * sizeof(int));
     cudaMalloc(&_leaf_tmp_range, (max_num_leaves + 1) * sizeof(int));
     // Allocating device memory for internal nodes
+    cudaMalloc(&_parent, get_max_num_internal() * sizeof(int));
+    cudaMalloc(&_tmp_parent, get_max_num_internal() * sizeof(int));
     cudaMalloc(&_left, get_max_num_internal() * sizeof(int));
     cudaMalloc(&_right, get_max_num_internal() * sizeof(int));
     cudaMalloc(&_leaves_begin, get_max_num_internal() * sizeof(int));
@@ -296,7 +354,15 @@ Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
     cudaMalloc(&_depth, get_max_num_internal() * sizeof(int));
     cudaMalloc(&_edge_delta, get_max_num_internal() * sizeof(int));
     cudaMalloc(&_octree_map, get_max_num_internal() * sizeof(int));
+
+    cudaMalloc(&_tmp_left, get_max_num_internal() * sizeof(int));
+    cudaMalloc(&_tmp_right, get_max_num_internal() * sizeof(int));
+    cudaMalloc(&_tmp_leaves_begin, get_max_num_internal() * sizeof(int));
+    cudaMalloc(&_tmp_leaves_end, get_max_num_internal() * sizeof(int));
+    cudaMalloc(&_tmp_edge_delta, get_max_num_internal() * sizeof(int));
+
     // Allocating device memory used for sorting operations
+    // TODO: consider using cub::CachingDeviceAllocator
     cudaMalloc(&_tmp_range, get_max_num_internal() * sizeof(int));
     cudaMalloc(&_tmp_perm1, get_max_num_internal() * sizeof(int));
     cudaMalloc(&_tmp_perm2, get_max_num_internal() * sizeof(int));
@@ -349,6 +415,7 @@ void Btree::generate_leaves(uint32_t *d_sorted_codes,
                                               _leaf_depth1,
                                               _num_leaves);
 
+    // TODO: make class member, consider sharing it with sorting tmp
     static thrust::device_vector<int> tmp_range_out(_max_num_leaves + 1);
 
     // Merges adjacent leaves until each holds no more than
@@ -379,6 +446,7 @@ void Btree::generate_leaves(uint32_t *d_sorted_codes,
 
 void Btree::build(uint32_t *d_sorted_codes, int *d_leaf_first_code)
 {
+    // TODO: make class member, consider sharing with sorting tmp
     static thrust::device_vector<uint32_t> d_leaf_codes(_max_num_leaves);
 
     // WARNING: watch out when gathering values from
@@ -392,8 +460,43 @@ void Btree::build(uint32_t *d_sorted_codes, int *d_leaf_first_code)
     _build_radix_tree<<<get_max_num_internal() / THREADS_PER_BLOCK +
                         (get_max_num_internal() % THREADS_PER_BLOCK > 0),
                         THREADS_PER_BLOCK>>>(
-                            thrust::raw_pointer_cast(&d_leaf_codes[0]),
+                            d_sorted_codes,
+                            _parent,
+                            _depth,
+                            _edge_delta,
+                            //thrust::raw_pointer_cast(&d_leaf_codes[0]),
                             *_d_this);
+
+    cudaMemcpy(_tmp_parent,
+               _parent,
+               get_max_num_internal() * sizeof(int),
+               cudaMemcpyDeviceToDevice);
+
+    int n = 1;
+    int num_launches = 0;
+    while (n < get_max_num_internal()) {
+        n = n << 1;
+        num_launches++;
+    }
+
+    std::cout << "num_launches=" << num_launches << std::endl;
+
+    for (int i = 0; i < num_launches + 3; ++i) {
+        _compute_nodes_depth<<<get_max_num_internal() / THREADS_PER_BLOCK +
+                               (get_max_num_internal() % THREADS_PER_BLOCK > 0),
+                               THREADS_PER_BLOCK>>>(_tmp_parent,
+                                                    _depth,
+                                                    _num_leaves);
+    }
+
+    /*
+    _copy_parent_depth<<<get_max_num_internal() / THREADS_PER_BLOCK +
+                         (get_max_num_internal() % THREADS_PER_BLOCK > 0),
+                         THREADS_PER_BLOCK>>>(_parent,
+                                              _depth,
+                                              _edge_delta,
+                                              _num_leaves);
+    */
 }
 
 // TODO: sorting is costly, compare the traversal
@@ -408,6 +511,9 @@ void Btree::sort_to_bfs_order()
         _tmp_sort_size,
         _depth,
         // TODO: avoid creating zip_iterator on the fly
+        // and test by sorting only _tmp_perm1 and gathering
+        // the other arrays
+        //_tmp_perm1,
         thrust::make_zip_iterator(
             thrust::device_pointer_cast(_left),
             thrust::device_pointer_cast(_right),
@@ -417,6 +523,57 @@ void Btree::sort_to_bfs_order()
             thrust::device_pointer_cast(_tmp_perm1)),
         get_max_num_internal(),
         _sort_op);
+
+    /*
+    thrust::gather(thrust::device,
+                   _tmp_perm1,
+                   _tmp_perm1 + get_max_num_internal(),
+                   _left,
+                   _tmp_left);
+    */
+
+    /*
+    tmp_ptr = _left;
+    _left = _tmp_left;
+    _tmp_left = tmp_ptr;
+
+    thrust::gather(thrust::device,
+                   _tmp_perm1,
+                   _tmp_perm1 + get_max_num_internal(),
+                   _right,
+                   _tmp_right);
+    thrust::gather(thrust::device,
+                   _tmp_perm1,
+                   _tmp_perm1 + get_max_num_internal(),
+                   _leaves_begin,
+                   _tmp_leaves_begin);
+    thrust::gather(thrust::device,
+                   _tmp_perm1,
+                   _tmp_perm1 + get_max_num_internal(),
+                   _leaves_end,
+                   _tmp_leaves_end);
+    thrust::gather(thrust::device,
+                   _tmp_perm1,
+                   _tmp_perm1 + get_max_num_internal(),
+                   _edge_delta,
+                   _tmp_edge_delta);
+
+    tmp_ptr = _right;
+    _right = _tmp_right;
+    _tmp_right = tmp_ptr;
+
+    tmp_ptr = _leaves_begin;
+    _leaves_begin = _tmp_leaves_begin;
+    _tmp_leaves_begin = tmp_ptr;
+
+    tmp_ptr = _leaves_end;
+    _leaves_end = _tmp_leaves_end;
+    _tmp_leaves_end = tmp_ptr;
+
+    tmp_ptr = _edge_delta;
+    _edge_delta = _tmp_edge_delta;
+    _tmp_edge_delta = tmp_ptr;
+    */
 
     // Reverse _tmp_perm1 mapping into _tmp_perm2
     // TODO: find a way to perform it using cub
@@ -458,6 +615,9 @@ Btree::~Btree()
     cudaFree(_leaf_tmp_range);
     cudaFree(_tmp_compact);
 
+    cudaFree(_parent);
+    cudaFree(_tmp_parent);
+
     cudaFree(_left);
     cudaFree(_right);
     cudaFree(_leaves_begin);
@@ -465,6 +625,12 @@ Btree::~Btree()
     cudaFree(_depth);
     cudaFree(_edge_delta);
     cudaFree(_octree_map);
+
+    cudaFree(_tmp_left);
+    cudaFree(_tmp_right);
+    cudaFree(_tmp_leaves_begin);
+    cudaFree(_tmp_leaves_end);
+    cudaFree(_tmp_edge_delta);
 
     cudaFree(_tmp_sort);
     cudaFree(_tmp_perm1);

@@ -51,6 +51,8 @@ public:
         std::vector<int> depth(get_max_num_internal());
         std::vector<int> edge(get_max_num_internal());
         std::vector<int> map(get_max_num_internal());
+        std::vector<int> parent(get_max_num_internal());
+        std::vector<int> perm(get_max_num_internal());
 
         cudaMemcpy(left.data(),
                    _left,
@@ -80,13 +82,22 @@ public:
                    _octree_map,
                    map.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
+        cudaMemcpy(parent.data(),
+                   _parent,
+                   parent.size() * sizeof(int),
+                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(perm.data(),
+                   _tmp_perm1,
+                   perm.size() * sizeof(int),
+                   cudaMemcpyDeviceToHost);
+
 
         for (int i = 0; i < get_max_num_internal(); ++i)
         {
-            printf("%2d: %2d - %2d - depth: %d - edge: %d - "
-                   "octree: %2d - range: %2d %2d\n",
-                   i, left[i], right[i], depth[i], edge[i], map[i],
-                   begin[i], end[i]);
+            printf("%2d -> %2d: %2d - %2d - depth: %d - edge: %d - "
+                   "octree: %2d - range: %2d %2d - parent: %d\n",
+                   perm[i], i, left[i], right[i], depth[i], edge[i], map[i],
+                   begin[i], end[i], parent[i]);
         }
     }
 
@@ -242,6 +253,8 @@ private:
     int *_tmp_compact;
     size_t _tmp_compact_size;
 
+    int *_parent;
+    int *_tmp_parent;
     // Arrays to store pointers (indices) to left and right children
     // of the internal nodes
     int *_left;
@@ -257,6 +270,12 @@ private:
     // Array to store the map between radix tree internal nodes
     // and octree nodes
     int *_octree_map;
+
+    int *_tmp_left;
+    int *_tmp_right;
+    int *_tmp_leaves_begin;
+    int *_tmp_leaves_end;
+    int *_tmp_edge_delta;
 
     // Data used to sort internal nodes
     int *_tmp_sort;
