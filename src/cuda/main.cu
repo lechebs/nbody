@@ -27,8 +27,8 @@
     std::cout << msg << ": " << ms << "ms" << std::endl; \
 }
 
-constexpr int NUM_POINTS = 2 << 8;
-constexpr int MAX_CODES_PER_LEAF = 16;
+constexpr int NUM_POINTS = 2 << 5;
+constexpr int MAX_CODES_PER_LEAF = 1;
 
 void print_bits(uint32_t u)
 {
@@ -48,8 +48,9 @@ int main()
     thrust::host_vector<float> h_z(NUM_POINTS);
 
     thrust::default_random_engine rng(100);
-    thrust::uniform_real_distribution<float> dist;
-    // thrust::random::normal_distribution<float> dist(0.5, 0.125);
+    // thrust::uniform_real_distribution<float> dist;
+
+    thrust::random::normal_distribution<float> dist(0.5, 0.125);
 
     auto dist_gen = [&] { return max(0.0f, min(1.0f, dist(rng))); };
 
@@ -118,7 +119,6 @@ int main()
     int *d_codes_occurrences_ptr =
         thrust::raw_pointer_cast(&d_codes_occurrences[0]);
 
-    // WARNING: Only Btree device copy will store the actual number of leaves
     int *d_num_unique_codes = h_btree.get_dev_num_leaves_ptr();
 
     void *d_runlength_tmp = nullptr;
@@ -203,9 +203,16 @@ int main()
     Points h_scan_points(d_scan_x_ptr, d_scan_y_ptr, d_scan_z_ptr);
     Points *d_scan_points = alloc_device_soa(&h_scan_points, sizeof(Points));
 
-    // TODO: is it correct?
-    // Octree h_octree(ceil(log2(num_unique_points) / 3) + 1)
-    Octree h_octree(8);
+    // If the octree is completely unbalanced, the number of internal
+    // nodes should be O((NUM_POINTS-1) / 3), while if it is completely
+    // balanced it should be O(geometric_sum(8, log2(NUM_POINTS) / 3))
+    // The latter expression bounds the former from above
+
+    // Note that the specified formulas assume that each leaf contains
+    // one point only, the number of internal nodes will actually be much
+    // smaller
+
+    Octree h_octree(geometric_sum(8, log2(NUM_POINTS) / 3));
 
     thrust::device_vector<int> d_leaf_first_code(NUM_POINTS + 1);
     int *d_leaf_first_code_ptr =
@@ -217,19 +224,12 @@ int main()
                             MAX_CODES_PER_LEAF);
     TIMER_STOP("btree-leaves", start, stop)
 
-    /*
     thrust::host_vector<uint32_t> h_unique_codes(d_unique_codes);
-    for (int i = 0; i < 32; ++i) {
+    for (int i = 0; i < 64; ++i) {
         printf("%4d: %12u ", i, h_unique_codes[i]);
         print_bits(h_unique_codes[i]);
         printf("\n");
     }
-
-    thrust::device_vector<int> h_leaf_first_code(d_leaf_first_code);
-    for (int i = 0; i < NUM_POINTS + 1; ++i) {
-        std::cout << "[" << i << "] " << h_leaf_first_code[i] << std::endl;
-    }
-    */
 
     TIMER_START(start)
     h_btree.build(d_unique_codes_ptr, d_leaf_first_code_ptr);
@@ -258,10 +258,9 @@ int main()
                                       d_scan_codes_occurrences_ptr);
     TIMER_STOP("octree-barycenters", start, stop)
 
-    // h_btree.print();
-    h_octree.print();
-
     std::cout << "num_unique_codes=" << h_num_unique_codes << std::endl;
+    h_btree.print();
+    h_octree.print();
 
     std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;
 

@@ -101,24 +101,16 @@ __global__ void _compute_octree_nodes_barycenter(Points *points,
     // The prefix sum of the mass array needs to be computed as well
 }
 
-Octree::Octree(int max_depth) : _max_depth(max_depth)
+Octree::Octree(int max_num_internal) : _max_num_internal(max_num_internal)
 {
-    _max_num_internal = 1;
-    int num_nodes_at_depth = 1;
-    // Nodes at max_depth are leaves
-    for (int d = 0; d < max_depth - 1; ++d) {
-        num_nodes_at_depth *= 8;
-        _max_num_internal += num_nodes_at_depth;
-    }
-
     // Allocating device memory to store octree nodes
-    cudaMalloc(&_children, _max_num_internal * 8 * sizeof(int));
-    cudaMalloc(&_num_children, _max_num_internal * sizeof(int));
-    cudaMalloc(&_leaves_begin, _max_num_internal * sizeof(int));
-    cudaMalloc(&_leaves_end, _max_num_internal * sizeof(int));
-    cudaMalloc(&_x_barycenter, _max_num_internal * sizeof(float));
-    cudaMalloc(&_y_barycenter, _max_num_internal * sizeof(float));
-    cudaMalloc(&_z_barycenter, _max_num_internal * sizeof(float));
+    cudaMalloc(&_children, max_num_internal * 8 * sizeof(int));
+    cudaMalloc(&_num_children, max_num_internal * sizeof(int));
+    cudaMalloc(&_leaves_begin, max_num_internal * sizeof(int));
+    cudaMalloc(&_leaves_end, max_num_internal * sizeof(int));
+    cudaMalloc(&_x_barycenter, max_num_internal * sizeof(float));
+    cudaMalloc(&_y_barycenter, max_num_internal * sizeof(float));
+    cudaMalloc(&_z_barycenter, max_num_internal * sizeof(float));
 
     // Allocating object copy in device memory
     cudaMalloc(&_d_this, sizeof(Octree));

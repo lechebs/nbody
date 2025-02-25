@@ -272,8 +272,6 @@ __global__ void _build_radix_tree(uint32_t *codes,
         parent[split + 1] = first;
     }
 
-    // btree.set_depth(first, node_lcp / 3);
-    // printf("[%2d] node_lcp=%d\n", first, node_lcp);
     btree.set_leaves_range(first, min_leaf, max_leaf);
 }
 
@@ -291,25 +289,6 @@ __global__ void _compute_nodes_depth(int *parent, int *depth, int *num_leaves)
         depth[idx] = curr_depth + depth[parent_idx];
         parent[idx] = parent[parent_idx];
     }
-}
-
-__global__ void _copy_parent_depth(int *parent,
-                                   int *depth,
-                                   int *edge_delta,
-                                   int *num_leaves)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= *num_leaves - 1) {
-        return;
-    }
-
-    int curr_idx = idx;
-    while (edge_delta[curr_idx] == 0) {
-        curr_idx = parent[curr_idx];
-    }
-
-    // printf("%2d -> %2d\n", idx, curr_idx);
-    depth[idx] = depth[curr_idx];
 }
 
 // Used to update pointers to children after sorting the nodes
@@ -415,7 +394,7 @@ void Btree::generate_leaves(uint32_t *d_sorted_codes,
                                               _leaf_depth1,
                                               _num_leaves);
 
-    // TODO: make class member, consider sharing it with sorting tmp
+    // TODO: create as class member, consider sharing it with sorting tmp
     static thrust::device_vector<int> tmp_range_out(_max_num_leaves + 1);
 
     // Merges adjacent leaves until each holds no more than
@@ -446,7 +425,7 @@ void Btree::generate_leaves(uint32_t *d_sorted_codes,
 
 void Btree::build(uint32_t *d_sorted_codes, int *d_leaf_first_code)
 {
-    // TODO: make class member, consider sharing with sorting tmp
+    // TODO: create as class member, consider sharing with sorting tmp
     static thrust::device_vector<uint32_t> d_leaf_codes(_max_num_leaves);
 
     // WARNING: watch out when gathering values from
@@ -467,19 +446,19 @@ void Btree::build(uint32_t *d_sorted_codes, int *d_leaf_first_code)
                             //thrust::raw_pointer_cast(&d_leaf_codes[0]),
                             *_d_this);
 
+    // TODO: is this fast enough? it's device to device
     cudaMemcpy(_tmp_parent,
                _parent,
                get_max_num_internal() * sizeof(int),
                cudaMemcpyDeviceToDevice);
 
+    // TODO: compute it once
     int n = 1;
     int num_launches = 0;
     while (n < get_max_num_internal()) {
         n = n << 1;
         num_launches++;
     }
-
-    std::cout << "num_launches=" << num_launches << std::endl;
 
     for (int i = 0; i < num_launches + 3; ++i) {
         _compute_nodes_depth<<<get_max_num_internal() / THREADS_PER_BLOCK +
@@ -488,15 +467,6 @@ void Btree::build(uint32_t *d_sorted_codes, int *d_leaf_first_code)
                                                     _depth,
                                                     _num_leaves);
     }
-
-    /*
-    _copy_parent_depth<<<get_max_num_internal() / THREADS_PER_BLOCK +
-                         (get_max_num_internal() % THREADS_PER_BLOCK > 0),
-                         THREADS_PER_BLOCK>>>(_parent,
-                                              _depth,
-                                              _edge_delta,
-                                              _num_leaves);
-    */
 }
 
 // TODO: sorting is costly, compare the traversal
@@ -523,6 +493,12 @@ void Btree::sort_to_bfs_order()
             thrust::device_pointer_cast(_tmp_perm1)),
         get_max_num_internal(),
         _sort_op);
+
+    // TODO: In order to test with gather I should probably directly
+    // pass all of the required array pointers to the kernels,
+    // in order to decouple them from the class, there wouldn't also
+    // be to the need to store a copy of the object in device memory,
+    // avoiding confusions regarding which data belongs where
 
     /*
     thrust::gather(thrust::device,
