@@ -15,7 +15,7 @@ class Octree
 {
 public:
     // max_depth ~= btree_height / 3
-    Octree(int max_depth);
+    Octree(int max_num_internal);
 
     void build(Btree &btree);
 
@@ -31,7 +31,6 @@ public:
         std::vector<float> x_barycenter(_max_num_internal);
         std::vector<float> y_barycenter(_max_num_internal);
         std::vector<float> z_barycenter(_max_num_internal);
-        int num_internal;
 
         cudaMemcpy(children.data(),
                    _children,
@@ -40,10 +39,6 @@ public:
         cudaMemcpy(num_children.data(),
                    _num_children,
                    sizeof(int) * _max_num_internal,
-                   cudaMemcpyDeviceToHost);
-        cudaMemcpy(&num_internal,
-                   &((*_d_this)._num_internal),
-                   sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(x_barycenter.data(),
                    _x_barycenter,
@@ -58,7 +53,7 @@ public:
                    sizeof(float) * _max_num_internal,
                    cudaMemcpyDeviceToHost);
 
-        for (int i = 0; i < 10; ++i)
+        for (int i = 0; i < 20; ++i)
         {
             printf("%2d: [", i);
             for (int j = 0; j < num_children[i]; ++j) {

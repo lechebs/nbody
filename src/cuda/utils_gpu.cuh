@@ -63,5 +63,12 @@ inline int geometric_sum(int base, int n)
     return (1 - pow) / (1 - base);
 }
 
+inline void swap_ptr(int **ptr1, int **ptr2)
+{
+    int *tmp = *ptr1;
+    *ptr1 = *ptr2;
+    *ptr2 = tmp;
+}
+
 #endif
 

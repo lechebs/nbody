@@ -27,7 +27,7 @@
     std::cout << msg << ": " << ms << "ms" << std::endl; \
 }
 
-constexpr int NUM_POINTS = 2 << 5;
+constexpr int NUM_POINTS = 2 << 18;
 constexpr int MAX_CODES_PER_LEAF = 1;
 
 void print_bits(uint32_t u)
@@ -48,9 +48,9 @@ int main()
     thrust::host_vector<float> h_z(NUM_POINTS);
 
     thrust::default_random_engine rng(100);
-    // thrust::uniform_real_distribution<float> dist;
+    thrust::uniform_real_distribution<float> dist;
 
-    thrust::random::normal_distribution<float> dist(0.5, 0.125);
+    // thrust::random::normal_distribution<float> dist(0.5, 0.125);
 
     auto dist_gen = [&] { return max(0.0f, min(1.0f, dist(rng))); };
 
@@ -212,7 +212,9 @@ int main()
     // one point only, the number of internal nodes will actually be much
     // smaller
 
-    Octree h_octree(geometric_sum(8, log2(NUM_POINTS) / 3));
+    int num_octree_internal = min(
+        NUM_POINTS, geometric_sum(8, ceil(log2(NUM_POINTS) / 3.0)));
+    Octree h_octree(num_octree_internal);
 
     thrust::device_vector<int> d_leaf_first_code(NUM_POINTS + 1);
     int *d_leaf_first_code_ptr =
@@ -224,12 +226,14 @@ int main()
                             MAX_CODES_PER_LEAF);
     TIMER_STOP("btree-leaves", start, stop)
 
+    /*
     thrust::host_vector<uint32_t> h_unique_codes(d_unique_codes);
     for (int i = 0; i < 64; ++i) {
         printf("%4d: %12u ", i, h_unique_codes[i]);
         print_bits(h_unique_codes[i]);
         printf("\n");
     }
+    */
 
     TIMER_START(start)
     h_btree.build(d_unique_codes_ptr, d_leaf_first_code_ptr);
@@ -259,7 +263,7 @@ int main()
     TIMER_STOP("octree-barycenters", start, stop)
 
     std::cout << "num_unique_codes=" << h_num_unique_codes << std::endl;
-    h_btree.print();
+    // h_btree.print();
     h_octree.print();
 
     std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;

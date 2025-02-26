@@ -264,6 +264,7 @@ private:
     int *_leaves_end;
     // Array to depth of the internal nodes
     int *_depth;
+    int *_tmp_depth;
     // Array to store the number of octree nodes that correspond
     // to the ascending edge of each radix tree internal node
     int *_edge_delta;

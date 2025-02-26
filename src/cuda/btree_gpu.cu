@@ -1,5 +1,7 @@
 #include "btree_gpu.cuh"
 
+#include "utils_gpu.cuh"
+
 #include <thrust/device_vector.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
@@ -192,9 +194,17 @@ __global__ void _build_radix_tree(uint32_t *codes,
     int first = blockIdx.x * blockDim.x + threadIdx.x;
     int num_leaves = btree.get_num_leaves();
 
-    if (first < btree.get_max_num_internal()) {
-        // Setting maximum depth for unused nodes
-        btree.set_depth(first, num_leaves);
+    if (first >= btree.get_num_internal() &&
+        first < btree.get_max_num_internal()) {
+        // WARNING: in order to obtain the correct number
+        // of required octree nodes by indexing the scanned
+        // edge_delta at position num_leaves-1 we have to be
+        // sure that the unused btree nodes, sorted by depth,
+        // are placed at the end of the array.
+        // This is also necessary if we're rebuilding the tree
+        // and the number of unique leaves may have changed
+        // from the previous iteration
+        btree.set_depth(first, num_leaves + 1); // +1 just to be sure
     }
 
     if (first >= btree.get_num_internal()) {
@@ -275,20 +285,28 @@ __global__ void _build_radix_tree(uint32_t *codes,
     btree.set_leaves_range(first, min_leaf, max_leaf);
 }
 
-__global__ void _compute_nodes_depth(int *parent, int *depth, int *num_leaves)
+__global__ void _compute_nodes_depth(int *parent_in,
+                                     int *parent_out,
+                                     int *depth_in,
+                                     int *depth_out,
+                                     int *num_leaves)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= *num_leaves - 1) {
         return;
     }
 
-    int parent_idx = parent[idx];
-    int curr_depth = depth[idx];
-    // If parent is not the root
-    if (parent_idx && curr_depth > 0) {
-        depth[idx] = curr_depth + depth[parent_idx];
-        parent[idx] = parent[parent_idx];
-    }
+    int curr_parent = parent_in[idx];
+    int curr_depth = depth_in[idx];
+
+    bool flag = curr_parent && curr_depth > 0;
+
+    int next_depth = curr_depth + depth_in[curr_parent] * flag;
+    // TODO: is multiplying by flag faster?
+    int next_parent = flag ? parent_in[curr_parent] : curr_parent;
+
+    parent_out[idx] = next_parent;
+    depth_out[idx] = next_depth;
 }
 
 // Used to update pointers to children after sorting the nodes
@@ -331,6 +349,7 @@ Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
     cudaMalloc(&_leaves_begin, get_max_num_internal() * sizeof(int));
     cudaMalloc(&_leaves_end, get_max_num_internal() * sizeof(int));
     cudaMalloc(&_depth, get_max_num_internal() * sizeof(int));
+    cudaMalloc(&_tmp_depth, get_max_num_internal() * sizeof(int));
     cudaMalloc(&_edge_delta, get_max_num_internal() * sizeof(int));
     cudaMalloc(&_octree_map, get_max_num_internal() * sizeof(int));
 
@@ -439,18 +458,12 @@ void Btree::build(uint32_t *d_sorted_codes, int *d_leaf_first_code)
     _build_radix_tree<<<get_max_num_internal() / THREADS_PER_BLOCK +
                         (get_max_num_internal() % THREADS_PER_BLOCK > 0),
                         THREADS_PER_BLOCK>>>(
-                            d_sorted_codes,
+                            //d_sorted_codes,
+                            thrust::raw_pointer_cast(&d_leaf_codes[0]),
                             _parent,
                             _depth,
                             _edge_delta,
-                            //thrust::raw_pointer_cast(&d_leaf_codes[0]),
                             *_d_this);
-
-    // TODO: is this fast enough? it's device to device
-    cudaMemcpy(_tmp_parent,
-               _parent,
-               get_max_num_internal() * sizeof(int),
-               cudaMemcpyDeviceToDevice);
 
     // TODO: compute it once
     int n = 1;
@@ -463,9 +476,14 @@ void Btree::build(uint32_t *d_sorted_codes, int *d_leaf_first_code)
     for (int i = 0; i < num_launches + 3; ++i) {
         _compute_nodes_depth<<<get_max_num_internal() / THREADS_PER_BLOCK +
                                (get_max_num_internal() % THREADS_PER_BLOCK > 0),
-                               THREADS_PER_BLOCK>>>(_tmp_parent,
+                               THREADS_PER_BLOCK>>>(_parent,
+                                                    _tmp_parent,
                                                     _depth,
+                                                    _tmp_depth,
                                                     _num_leaves);
+
+        swap_ptr(&_parent, &_tmp_parent);
+        swap_ptr(&_depth, &_tmp_depth);
     }
 }
 
@@ -593,6 +611,7 @@ Btree::~Btree()
 
     cudaFree(_parent);
     cudaFree(_tmp_parent);
+    cudaFree(_tmp_depth);
 
     cudaFree(_left);
     cudaFree(_right);
