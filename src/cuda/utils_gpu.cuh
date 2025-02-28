@@ -2,6 +2,8 @@
 #define UTILS_GPU_CUH
 
 constexpr int THREADS_PER_BLOCK = 32;
+// TODO: compute it such that a SM is fully utilized
+constexpr int MAX_THREADS_PER_BLOCK = 512;
 
 // Allocates device memory to store SoA
 // and copies member data from host
@@ -22,9 +24,9 @@ class Points
 public:
     Points(float *x, float *y, float *z) : _x(x), _y(y), _z(z) {}
 
-    __device__ __forceinline__ float get_x(int idx) { return _x[idx]; }
-    __device__ __forceinline__ float get_y(int idx) { return _y[idx]; }
-    __device__ __forceinline__ float get_z(int idx) { return _z[idx]; }
+    __device__ __forceinline__ float get_x(int idx) const { return _x[idx]; }
+    __device__ __forceinline__ float get_y(int idx) const { return _y[idx]; }
+    __device__ __forceinline__ float get_z(int idx) const { return _z[idx]; }
 
 private:
     float *_x;

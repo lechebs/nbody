@@ -119,7 +119,7 @@ int main()
     int *d_codes_occurrences_ptr =
         thrust::raw_pointer_cast(&d_codes_occurrences[0]);
 
-    int *d_num_unique_codes = h_btree.get_dev_num_leaves_ptr();
+    int *d_num_unique_codes = h_btree.get_d_num_leaves_ptr();
 
     void *d_runlength_tmp = nullptr;
     size_t runlength_tmp_size;
@@ -216,19 +216,19 @@ int main()
         NUM_POINTS, geometric_sum(8, ceil(log2(NUM_POINTS) / 3.0)));
     Octree h_octree(num_octree_internal);
 
-    thrust::device_vector<int> d_leaf_first_code(NUM_POINTS + 1);
-    int *d_leaf_first_code_ptr =
-        thrust::raw_pointer_cast(&d_leaf_first_code[0]);
+    thrust::device_vector<int> d_leaf_first_code_idx(NUM_POINTS + 1);
+    int *d_leaf_first_code_idx_ptr =
+        thrust::raw_pointer_cast(&d_leaf_first_code_idx[0]);
 
     TIMER_START(start)
     h_btree.generate_leaves(d_unique_codes_ptr,
-                            d_leaf_first_code_ptr,
+                            d_leaf_first_code_idx_ptr,
                             MAX_CODES_PER_LEAF);
     TIMER_STOP("btree-leaves", start, stop)
 
     /*
     thrust::host_vector<uint32_t> h_unique_codes(d_unique_codes);
-    for (int i = 0; i < 64; ++i) {
+    for (int i = 0; i < 32; ++i) {
         printf("%4d: %12u ", i, h_unique_codes[i]);
         print_bits(h_unique_codes[i]);
         printf("\n");
@@ -236,7 +236,7 @@ int main()
     */
 
     TIMER_START(start)
-    h_btree.build(d_unique_codes_ptr, d_leaf_first_code_ptr);
+    h_btree.build(d_unique_codes_ptr, d_leaf_first_code_idx_ptr);
     TIMER_STOP("btree-build", start, stop)
 
     // WARNING: Perhaps sort octree instead?
@@ -258,11 +258,12 @@ int main()
     TIMER_START(start)
     h_octree.compute_nodes_barycenter(d_points,
                                       d_scan_points,
-                                      d_leaf_first_code_ptr,
+                                      d_leaf_first_code_idx_ptr,
                                       d_scan_codes_occurrences_ptr);
     TIMER_STOP("octree-barycenters", start, stop)
 
     std::cout << "num_unique_codes=" << h_num_unique_codes << std::endl;
+
     // h_btree.print();
     h_octree.print();
 
