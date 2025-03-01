@@ -26,7 +26,8 @@ __global__ void _build_octree(struct Btree::Nodes btree_internal,
 
     if (idx == 0) {
         *octree_num_internal =
-            btree_internal.octree_map[btree_num_internal - 1];
+            btree_internal.octree_map[btree_num_internal - 1] +
+            btree_internal.edge_delta[btree_num_internal - 1];
     }
 
     int parent = btree_internal.octree_map[idx];

@@ -187,6 +187,7 @@ __global__ void _merge_leaves(const uint32_t *codes,
 
     leaf_first_out[idx] = idx;
 
+    int left_old = 0;
     int left = 0;
     int right = 0;
     int depth_delta = 0;
@@ -194,8 +195,9 @@ __global__ void _merge_leaves(const uint32_t *codes,
     int num_codes = leaf_first_in[idx + 1] - leaf_first_in[idx];
 
     // Attempts to raise a leaf to a smaller depth
-    while (num_codes < max_num_codes_per_leaf) {
+    while (num_codes <= max_num_codes_per_leaf) {
         depth_delta++;
+        left_old = left;
 
         // Searching for first and last codes covered
         // by the candidate merged leaf
@@ -209,7 +211,7 @@ __global__ void _merge_leaves(const uint32_t *codes,
     }
 
     // Keeping only leaf entries at the start of each merged leaf
-    leaf_flagged[idx] = left == 0;
+    leaf_flagged[idx] = left_old == 0;
 }
 
 // TODO: single pointer for both left and right, and for both
