@@ -16,18 +16,18 @@ __global__ void _build_octree(struct Btree::Nodes btree_internal,
                               int octree_max_num_internal)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int btree_num_internal = *btree_num_leaves - 1;
+    int btree_num_nodes = 2 * *btree_num_leaves - 1;
 
     int is_octree_node = btree_internal.edge_delta[idx];
 
-    if (idx >= btree_num_internal || !is_octree_node) {
+    if (idx >= btree_num_nodes || !is_octree_node) {
         return;
     }
 
     if (idx == 0) {
         *octree_num_internal =
-            btree_internal.octree_map[btree_num_internal - 1] +
-            btree_internal.edge_delta[btree_num_internal - 1];
+            btree_internal.octree_map[btree_num_nodes - 1] +
+            btree_internal.edge_delta[btree_num_nodes - 1];
     }
 
     int parent = btree_internal.octree_map[idx];
@@ -35,10 +35,16 @@ __global__ void _build_octree(struct Btree::Nodes btree_internal,
     // Resetting number of children
     octree_internal.num_children[parent] = 0;
 
-    octree_internal.leaves_begin[parent] =
-        btree_internal.leaves_begin[idx];
-    octree_internal.leaves_end[parent] =
-        btree_internal.leaves_end[idx];
+    int node_leaves_begin = btree_internal.leaves_begin[idx];
+    int node_leaves_end = btree_internal.leaves_end[idx];
+
+    octree_internal.leaves_begin[parent] = node_leaves_begin;
+    octree_internal.leaves_end[parent] = node_leaves_end;
+
+    if (node_leaves_begin == node_leaves_end) {
+        // Leaf octree node
+        return;
+    }
 
     // Stack used to traverse at most 3 levels
     int stack[_BUILD_STACK_SIZE];
@@ -49,24 +55,17 @@ __global__ void _build_octree(struct Btree::Nodes btree_internal,
     int bin_node = btree_internal.left[idx];
     while (end >= 0) {
         is_octree_node = btree_internal.edge_delta[bin_node];
-        int is_leaf = bin_node >= btree_num_internal;
 
-        if (bin_node != idx && (is_leaf || is_octree_node)) {
+        if (bin_node != idx && is_octree_node) {
 
-            // Removing offset for leaf pointers
-            int child = is_leaf ? bin_node - btree_num_internal :
-                                  btree_internal.octree_map[bin_node];
+            int child = btree_internal.octree_map[bin_node];
 
             int num_children = octree_internal.num_children[parent];
 
             octree_internal.children[
-                num_children * octree_max_num_internal + parent] =
+                num_children * octree_max_num_internal + parent] = child;
                 // TODO:: doesn't show noticeable difference from
                 //_children[parent * 8 + num_children] =
-
-                // Pointers to leaf nodes are offset by the
-                // maximum number of internal nodes
-                child + is_leaf * octree_max_num_internal;
 
             octree_internal.num_children[parent] = ++num_children;
 

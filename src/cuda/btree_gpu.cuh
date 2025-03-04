@@ -43,6 +43,11 @@ public:
         return _max_num_leaves - 1;
     }
 
+    int get_max_num_nodes() const
+    {
+        return 2 * _max_num_leaves - 1;
+    }
+
     // Generates leaf nodes such that each contain no more than
     // max_num_points_per_leaf
     void generate_leaves(const uint32_t *d_sorted_codes,
@@ -61,15 +66,15 @@ public:
 
     void print()
     {
-        std::vector<int> left(get_max_num_internal());
-        std::vector<int> right(get_max_num_internal());
-        std::vector<int> begin(get_max_num_internal());
-        std::vector<int> end(get_max_num_internal());
-        std::vector<int> depth(get_max_num_internal());
-        std::vector<int> edge(get_max_num_internal());
-        std::vector<int> map(get_max_num_internal());
-        std::vector<int> parent(get_max_num_internal());
-        std::vector<int> perm(get_max_num_internal());
+        std::vector<int> left(get_max_num_nodes());
+        std::vector<int> right(get_max_num_nodes());
+        std::vector<int> begin(get_max_num_nodes());
+        std::vector<int> end(get_max_num_nodes());
+        std::vector<int> depth(get_max_num_nodes());
+        std::vector<int> edge(get_max_num_nodes());
+        std::vector<int> map(get_max_num_nodes());
+        std::vector<int> parent(get_max_num_nodes());
+        std::vector<int> perm(get_max_num_nodes());
 
         cudaMemcpy(left.data(),
                    _internal.left,
@@ -104,12 +109,12 @@ public:
                    parent.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(perm.data(),
-                   _tmp_ranges + get_max_num_internal(),
+                   _tmp_ranges + get_max_num_nodes(),
                    perm.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
 
 
-        for (int i = 0; i < get_max_num_internal(); ++i)
+        for (int i = 0; i < get_max_num_nodes(); ++i)
         {
             printf("%2d -> %2d: %2d - %2d - depth: %d - edge: %d - "
                    "octree: %2d - range: %2d %2d - parent: %d\n",
