@@ -27,8 +27,8 @@
     std::cout << msg << ": " << ms << "ms" << std::endl; \
 }
 
-constexpr int NUM_POINTS = 2 << 18;
-constexpr int MAX_CODES_PER_LEAF = 1;
+constexpr int NUM_POINTS = 2 << 17;
+constexpr int MAX_CODES_PER_LEAF = 16;
 
 void print_bits(uint32_t u)
 {
@@ -105,6 +105,15 @@ int main()
                                     custom_op);
     TIMER_STOP("sort-codes", start, stop)
     cudaFree(d_sort_tmp);
+
+    /*
+    h_x = d_x;
+    h_y = d_y;
+    h_z = d_z;
+    for (int i = 0; i < NUM_POINTS; ++i) {
+        printf("[%3d] (%.3f, %.3f, %.3f)\n", i, h_x[i], h_y[i], h_z[i]);
+    }
+    */
 
     // Allocating Btree for NUM_POINTS number of leaves,
     // the actual number of leaves will be smaller
@@ -213,7 +222,8 @@ int main()
     // smaller
 
     int num_octree_internal = min(
-        NUM_POINTS, geometric_sum(8, ceil(log2(NUM_POINTS) / 3.0)));
+        2 * NUM_POINTS,
+        geometric_sum(8, ceil(log2(NUM_POINTS) / 3.0) + 1));
     Octree h_octree(num_octree_internal);
 
     thrust::device_vector<int> d_leaf_first_code_idx(NUM_POINTS + 1);

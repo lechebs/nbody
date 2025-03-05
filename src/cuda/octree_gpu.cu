@@ -143,8 +143,8 @@ Octree::Octree(int max_num_internal) : _max_num_internal(max_num_internal)
 
 void Octree::build(const Btree &btree)
 {
-    _build_octree<<<btree.get_max_num_internal() / THREADS_PER_BLOCK +
-                    (btree.get_max_num_internal() % THREADS_PER_BLOCK > 0),
+    _build_octree<<<btree.get_max_num_nodes() / THREADS_PER_BLOCK +
+                    (btree.get_max_num_nodes() % THREADS_PER_BLOCK > 0),
                     THREADS_PER_BLOCK>>>(btree.get_d_internal(),
                                          _internal,
                                          btree.get_d_num_leaves_ptr(),

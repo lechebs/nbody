@@ -154,6 +154,8 @@ __device__ void _set_node_child(const uint32_t *codes,
     internal.depth[2 * child_idx + !is_leaf] = delta;
 
     if (is_leaf) {
+        internal.left[2 * child_idx] = 0;
+        internal.right[2 * child_idx] = 0;
         internal.leaves_begin[2 * child_idx] = child_idx;
         internal.leaves_end[2 * child_idx] = child_idx;
     }
@@ -225,8 +227,7 @@ __global__ void _merge_leaves(const uint32_t *codes,
     leaf_flagged[idx] = left_old == 0;
 }
 
-// TODO: single pointer for both left and right, and for both
-// leaves_begin and leaves_end
+// TODO: improve coalescence
 __global__ void _build_radix_tree(const uint32_t *codes,
                                   struct Btree::Nodes internal,
                                   int *tmp_ranges,
@@ -239,6 +240,16 @@ __global__ void _build_radix_tree(const uint32_t *codes,
     int num_leaves = *num_leaves_;
     int num_internal = num_leaves - 1;
 
+    if (idx < max_num_internal) {
+        // TODO: coalesce it in a separate kernel
+        // Filling tmp ranges used to later sort tree nodes
+#pragma unroll
+        for (int i = 0; i < 3; i++) {
+            tmp_ranges[2 * idx + max_num_nodes * i] = 2 * idx;
+            tmp_ranges[2 * idx + 1 + max_num_nodes * i] = 2 * idx + 1;
+        }
+    }
+
     if (idx >= num_internal && idx < max_num_internal) {
         // WARNING: in order to obtain the correct number
         // of required octree nodes by indexing the scanned
@@ -248,19 +259,14 @@ __global__ void _build_radix_tree(const uint32_t *codes,
         // This is also necessary if we're rebuilding the tree
         // and the number of unique leaves may have changed
         // from the previous iteration
-        internal.depth[2 * idx + 1] = num_leaves + 1; // +1 just to be sure
-        internal.depth[2 * idx + 2] = num_leaves + 1; // +1 just to be sure
+
+        // WARNING: make sure this is correct
+        internal.depth[2 * idx + 1] = 2 * num_leaves; // +1 just to be sure
+        internal.depth[2 * idx + 2] = 2 * num_leaves; // +1 just to be sure
     }
 
     if (idx >= num_internal) {
         return;
-    }
-
-    // Filling tmp ranges used to later sort tree nodes
-#pragma unroll
-    for (int i = 0; i < 3; i++) {
-        tmp_ranges[2 * idx + max_num_nodes * i] = 2 * idx;
-        tmp_ranges[2 * idx + 1 + max_num_nodes * i] = 2 * idx + 1;
     }
 
     if (idx == 0) {
@@ -271,8 +277,7 @@ __global__ void _build_radix_tree(const uint32_t *codes,
 
 #pragma unroll
         for (int i = 0; i < 3; i++) {
-            tmp_ranges[2 * num_leaves - 2 + max_num_nodes * i] =
-                2 * num_leaves - 2;
+            tmp_ranges[max_num_nodes * (i + 1) - 1] = max_num_nodes - 1;
         }
     }
 
@@ -387,11 +392,12 @@ __global__ void _correct_child_pointers(int *left,
     int left_value = left[idx];
     int right_value = right[idx];
 
-    // This check can be ignored I guess
+    // TODO: This check could be ignored
     if (left_value != 0 || right_value != 0) {
         left[idx] = map[left_value];
         right[idx] = map[right_value];
     }
+
     // Quite inefficient
     /*
     if (left_value < num_internal)
