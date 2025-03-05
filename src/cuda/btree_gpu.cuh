@@ -22,20 +22,23 @@ public:
         int *edge_delta;
         int *leaves_begin;
         int *leaves_end;
-
-        int *octree_map;
     };
 
     Btree(int max_num_leaves);
 
-    struct Nodes get_d_internal() const
+    struct Nodes get_d_nodes() const
     {
-        return _internal;
+        return _nodes;
     }
 
     int *get_d_num_leaves_ptr() const
     {
         return _num_leaves;
+    }
+
+    const int *get_d_octree_map() const
+    {
+        return _octree_map;
     }
 
     int get_max_num_internal() const
@@ -77,35 +80,35 @@ public:
         std::vector<int> perm(get_max_num_nodes());
 
         cudaMemcpy(left.data(),
-                   _internal.left,
+                   _nodes.left,
                    left.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(right.data(),
-                   _internal.right,
+                   _nodes.right,
                    right.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(begin.data(),
-                   _internal.leaves_begin,
+                   _nodes.leaves_begin,
                    begin.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(end.data(),
-                   _internal.leaves_end,
+                   _nodes.leaves_end,
                    end.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(depth.data(),
-                   _internal.depth,
+                   _nodes.depth,
                    depth.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(edge.data(),
-                   _internal.edge_delta,
+                   _nodes.edge_delta,
                    edge.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(map.data(),
-                   _internal.octree_map,
+                   _octree_map,
                    map.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(parent.data(),
-                   _internal.parent,
+                   _nodes.parent,
                    parent.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(perm.data(),
@@ -129,9 +132,11 @@ private:
     int _max_num_leaves;
     int *_num_leaves;
 
-    // Wrapper to internal nodes arrays
-    Nodes _internal;
-    Nodes _tmp_internal;
+    // Wrapper to nodes arrays
+    Nodes _nodes;
+    Nodes _tmp_nodes;
+
+    int *_octree_map;
 
     // Buffers used for temporary storage
     int *_tmp;

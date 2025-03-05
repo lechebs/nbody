@@ -30,7 +30,7 @@ public:
     };
 
     // max_depth ~= btree_height / 3
-    Octree(int max_num_internal);
+    Octree(int max_num_nodes);
 
     void build(const Btree &btree);
 
@@ -41,41 +41,52 @@ public:
 
     void print()
    {
-        std::vector<int> children(_max_num_internal * 8);
-        std::vector<int> num_children(_max_num_internal);
-        std::vector<float> x_barycenter(_max_num_internal);
-        std::vector<float> y_barycenter(_max_num_internal);
-        std::vector<float> z_barycenter(_max_num_internal);
+        std::vector<int> children(_max_num_nodes * 8);
+        std::vector<int> num_children(_max_num_nodes);
+        std::vector<int> leaves_begin(_max_num_nodes);
+        std::vector<int> leaves_end(_max_num_nodes);
+        std::vector<float> x_barycenter(_max_num_nodes);
+        std::vector<float> y_barycenter(_max_num_nodes);
+        std::vector<float> z_barycenter(_max_num_nodes);
 
         cudaMemcpy(children.data(),
-                   _internal.children,
-                   sizeof(int) * _max_num_internal * 8,
+                   _nodes.children,
+                   sizeof(int) * _max_num_nodes * 8,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(num_children.data(),
-                   _internal.num_children,
-                   sizeof(int) * _max_num_internal,
+                   _nodes.num_children,
+                   sizeof(int) * _max_num_nodes,
+                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(leaves_begin.data(),
+                   _nodes.leaves_begin,
+                   sizeof(int) * _max_num_nodes,
+                   cudaMemcpyDeviceToHost);
+        cudaMemcpy(leaves_end.data(),
+                   _nodes.leaves_end,
+                   sizeof(int) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(x_barycenter.data(),
-                   _internal.x_barycenter,
-                   sizeof(float) * _max_num_internal,
+                   _nodes.x_barycenter,
+                   sizeof(float) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(y_barycenter.data(),
-                   _internal.y_barycenter,
-                   sizeof(float) * _max_num_internal,
+                   _nodes.y_barycenter,
+                   sizeof(float) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(z_barycenter.data(),
-                   _internal.z_barycenter,
-                   sizeof(float) * _max_num_internal,
+                   _nodes.z_barycenter,
+                   sizeof(float) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
 
-        for (int i = 0; i < 20; ++i)
+        for (int i = 0; i < min(100, _max_num_nodes); ++i)
         {
             printf("%2d: [", i);
             for (int j = 0; j < num_children[i]; ++j) {
-                printf(" %2d", children[j * _max_num_internal + i]);
+                printf(" %3d", children[j * _max_num_nodes + i]);
             }
-            printf("] - barycenter: (%.3f, %.3f, %.3f)\n",
-                   x_barycenter[i], y_barycenter[i], z_barycenter[i]);
+            printf("] - (%.3f, %.3f, %.3f) - %3d %3d\n",
+                   x_barycenter[i], y_barycenter[i], z_barycenter[i],
+                   leaves_begin[i], leaves_end[i]);
         }
     }
 
@@ -83,11 +94,11 @@ public:
 
 private:
     int _max_depth;
-    int _max_num_internal;
+    int _max_num_nodes;
 
-    int *_num_internal;
+    int *_num_nodes;
 
-    Nodes _internal;
+    Nodes _nodes;
 };
 
 #endif

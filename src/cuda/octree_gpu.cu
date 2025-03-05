@@ -9,37 +9,36 @@
 // 3 levels of any subtree of the binary radix tree
 #define _BUILD_STACK_SIZE 16
 
-__global__ void _build_octree(struct Btree::Nodes btree_internal,
-                              struct Octree::Nodes octree_internal,
+__global__ void _build_octree(struct Btree::Nodes btree_nodes,
+                              struct Octree::Nodes octree_nodes,
+                              const int *btree_octree_map,
                               const int *btree_num_leaves,
-                              int *octree_num_internal,
-                              int octree_max_num_internal)
+                              int *octree_num_nodes,
+                              int octree_max_num_nodes)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int btree_num_nodes = 2 * *btree_num_leaves - 1;
 
-    int is_octree_node = btree_internal.edge_delta[idx];
-
-    if (idx >= btree_num_nodes || !is_octree_node) {
+    if (idx >= btree_num_nodes || !btree_nodes.edge_delta[idx]) {
         return;
     }
 
     if (idx == 0) {
-        *octree_num_internal =
-            btree_internal.octree_map[btree_num_nodes - 1] +
-            btree_internal.edge_delta[btree_num_nodes - 1];
+        *octree_num_nodes =
+            btree_octree_map[btree_num_nodes - 1] +
+            btree_nodes.edge_delta[btree_num_nodes - 1];
     }
 
-    int parent = btree_internal.octree_map[idx];
+    int parent = btree_octree_map[idx];
 
     // Resetting number of children
-    octree_internal.num_children[parent] = 0;
+    octree_nodes.num_children[parent] = 0;
 
-    int node_leaves_begin = btree_internal.leaves_begin[idx];
-    int node_leaves_end = btree_internal.leaves_end[idx];
+    int node_leaves_begin = btree_nodes.leaves_begin[idx];
+    int node_leaves_end = btree_nodes.leaves_end[idx];
 
-    octree_internal.leaves_begin[parent] = node_leaves_begin;
-    octree_internal.leaves_end[parent] = node_leaves_end;
+    octree_nodes.leaves_begin[parent] = node_leaves_begin;
+    octree_nodes.leaves_end[parent] = node_leaves_end;
 
     if (node_leaves_begin == node_leaves_end) {
         // Leaf octree node
@@ -52,31 +51,31 @@ __global__ void _build_octree(struct Btree::Nodes btree_internal,
     int end = 0;
     stack[end++] = idx;
 
-    int bin_node = btree_internal.left[idx];
+    int bin_node = btree_nodes.left[idx];
     while (end >= 0) {
-        is_octree_node = btree_internal.edge_delta[bin_node];
+        int is_octree_node = btree_nodes.edge_delta[bin_node];
 
         if (bin_node != idx && is_octree_node) {
 
-            int child = btree_internal.octree_map[bin_node];
+            int child = btree_octree_map[bin_node];
 
-            int num_children = octree_internal.num_children[parent];
+            int num_children = octree_nodes.num_children[parent];
 
-            octree_internal.children[
-                num_children * octree_max_num_internal + parent] = child;
+            octree_nodes.children[
+                num_children * octree_max_num_nodes + parent] = child;
                 // TODO:: doesn't show noticeable difference from
                 //_children[parent * 8 + num_children] =
 
-            octree_internal.num_children[parent] = ++num_children;
+            octree_nodes.num_children[parent] = ++num_children;
 
             end--;
             if (end >= 0) {
-                bin_node = btree_internal.right[stack[end]];
+                bin_node = btree_nodes.right[stack[end]];
             }
 
         } else {
             stack[end++] = bin_node;
-            bin_node = btree_internal.left[bin_node];
+            bin_node = btree_nodes.left[bin_node];
         }
     }
 }
@@ -85,14 +84,14 @@ __global__ void _compute_octree_nodes_barycenter(const Points *points,
                                                  const Points *scan_points,
                                                  const int *leaf_first_code_idx,
                                                  const int *scan_codes_occurrences,
-                                                 struct Octree::Nodes internal,
-                                                 const int *num_internal)
+                                                 struct Octree::Nodes nodes,
+                                                 const int *num_nodes)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= *num_internal) return;
+    if (idx >= *num_nodes) return;
 
-    int leaves_begin = internal.leaves_begin[idx];
-    int leaves_end = internal.leaves_end[idx];
+    int leaves_begin = nodes.leaves_begin[idx];
+    int leaves_end = nodes.leaves_end[idx];
 
     int codes_begin = leaf_first_code_idx[leaves_begin];
     int codes_end = leaf_first_code_idx[leaves_end + 1] - 1;
@@ -119,37 +118,38 @@ __global__ void _compute_octree_nodes_barycenter(const Points *points,
     y_barycenter /= mass_sum;
     z_barycenter /= mass_sum;
 
-    internal.x_barycenter[idx] = x_barycenter;
-    internal.y_barycenter[idx] = y_barycenter;
-    internal.z_barycenter[idx] = z_barycenter;
+    nodes.x_barycenter[idx] = x_barycenter;
+    nodes.y_barycenter[idx] = y_barycenter;
+    nodes.z_barycenter[idx] = z_barycenter;
 
     // When dealing with different masses, multiply the x array 
     // with the mass array and then compute the prefix sum
     // The prefix sum of the mass array needs to be computed as well
 }
 
-Octree::Octree(int max_num_internal) : _max_num_internal(max_num_internal)
+Octree::Octree(int max_num_nodes) : _max_num_nodes(max_num_nodes)
 {
-    cudaMalloc(&_num_internal, sizeof(int));
+    cudaMalloc(&_num_nodes, sizeof(int));
     // Allocating device memory to store octree nodes
-    cudaMalloc(&_internal.children, max_num_internal * 8 * sizeof(int));
-    cudaMalloc(&_internal.num_children, max_num_internal * sizeof(int));
-    cudaMalloc(&_internal.leaves_begin, max_num_internal * sizeof(int));
-    cudaMalloc(&_internal.leaves_end, max_num_internal * sizeof(int));
-    cudaMalloc(&_internal.x_barycenter, max_num_internal * sizeof(float));
-    cudaMalloc(&_internal.y_barycenter, max_num_internal * sizeof(float));
-    cudaMalloc(&_internal.z_barycenter, max_num_internal * sizeof(float));
+    cudaMalloc(&_nodes.children, max_num_nodes * 8 * sizeof(int));
+    cudaMalloc(&_nodes.num_children, max_num_nodes * sizeof(int));
+    cudaMalloc(&_nodes.leaves_begin, max_num_nodes * sizeof(int));
+    cudaMalloc(&_nodes.leaves_end, max_num_nodes * sizeof(int));
+    cudaMalloc(&_nodes.x_barycenter, max_num_nodes * sizeof(float));
+    cudaMalloc(&_nodes.y_barycenter, max_num_nodes * sizeof(float));
+    cudaMalloc(&_nodes.z_barycenter, max_num_nodes * sizeof(float));
 }
 
 void Octree::build(const Btree &btree)
 {
     _build_octree<<<btree.get_max_num_nodes() / THREADS_PER_BLOCK +
                     (btree.get_max_num_nodes() % THREADS_PER_BLOCK > 0),
-                    THREADS_PER_BLOCK>>>(btree.get_d_internal(),
-                                         _internal,
+                    THREADS_PER_BLOCK>>>(btree.get_d_nodes(),
+                                         _nodes,
+                                         btree.get_d_octree_map(),
                                          btree.get_d_num_leaves_ptr(),
-                                         _num_internal,
-                                         _max_num_internal);
+                                         _num_nodes,
+                                         _max_num_nodes);
 }
 
 void Octree::compute_nodes_barycenter(const Points *points,
@@ -158,25 +158,25 @@ void Octree::compute_nodes_barycenter(const Points *points,
                                       const int *scan_codes_occurrences)
 {
     _compute_octree_nodes_barycenter<<<
-        _max_num_internal / THREADS_PER_BLOCK +
-        (_max_num_internal % THREADS_PER_BLOCK > 0),
+        _max_num_nodes / THREADS_PER_BLOCK +
+        (_max_num_nodes % THREADS_PER_BLOCK > 0),
         THREADS_PER_BLOCK>>>(points,
                              scan_points,
                              leaf_first_code,
                              scan_codes_occurrences,
-                             _internal,
-                             _num_internal);
+                             _nodes,
+                             _num_nodes);
 }
 
 Octree::~Octree()
 {
-    cudaFree(_num_internal);
+    cudaFree(_num_nodes);
 
-    cudaFree(_internal.children);
-    cudaFree(_internal.num_children);
-    cudaFree(_internal.leaves_begin);
-    cudaFree(_internal.leaves_end);
-    cudaFree(_internal.x_barycenter);
-    cudaFree(_internal.y_barycenter);
-    cudaFree(_internal.z_barycenter);
+    cudaFree(_nodes.children);
+    cudaFree(_nodes.num_children);
+    cudaFree(_nodes.leaves_begin);
+    cudaFree(_nodes.leaves_end);
+    cudaFree(_nodes.x_barycenter);
+    cudaFree(_nodes.y_barycenter);
+    cudaFree(_nodes.z_barycenter);
 }
