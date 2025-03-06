@@ -27,8 +27,8 @@
     std::cout << msg << ": " << ms << "ms" << std::endl; \
 }
 
-constexpr int NUM_POINTS = 2 << 17;
-constexpr int MAX_CODES_PER_LEAF = 16;
+constexpr int NUM_POINTS = 2 << 18;
+constexpr int MAX_CODES_PER_LEAF = 32;
 
 void print_bits(uint32_t u)
 {
@@ -48,9 +48,9 @@ int main()
     thrust::host_vector<float> h_z(NUM_POINTS);
 
     thrust::default_random_engine rng(100);
-    thrust::uniform_real_distribution<float> dist;
+    // thrust::uniform_real_distribution<float> dist;
 
-    // thrust::random::normal_distribution<float> dist(0.5, 0.125);
+    thrust::random::normal_distribution<float> dist(0.5, 0.125);
 
     auto dist_gen = [&] { return max(0.0f, min(1.0f, dist(rng))); };
 
@@ -157,6 +157,7 @@ int main()
                d_num_unique_codes,
                sizeof(int),
                cudaMemcpyDeviceToHost);
+    std::cout << "num_unique_codes=" << h_num_unique_codes << std::endl;
 
     // Computing exclusive scan of d_codes_occurrences
     thrust::device_vector<int> d_scan_codes_occurrences(NUM_POINTS);
@@ -245,9 +246,22 @@ int main()
     }
     */
 
+    TIMER_START(start);
+    cudaMemcpy(&h_num_unique_codes,
+               h_btree.get_d_num_leaves_ptr(),
+               sizeof(int),
+               cudaMemcpyDeviceToHost);
+    TIMER_STOP("memcpy-num-leaves", start, stop);
+    std::cout << "num_leaves=" << h_num_unique_codes << std::endl;
+
+    // Setting max values to actual ones to speedup kernel launches
+    h_btree.set_max_num_leaves(h_num_unique_codes);
+    h_octree.set_max_num_nodes(h_btree.get_max_num_nodes());
+
     TIMER_START(start)
     h_btree.build(d_unique_codes_ptr, d_leaf_first_code_idx_ptr);
     TIMER_STOP("btree-build", start, stop)
+
 
     // WARNING: Perhaps sort octree instead?
     // Octree nodes are ~1/3 of the btree nodes,
@@ -271,8 +285,6 @@ int main()
                                       d_leaf_first_code_idx_ptr,
                                       d_scan_codes_occurrences_ptr);
     TIMER_STOP("octree-barycenters", start, stop)
-
-    std::cout << "num_unique_codes=" << h_num_unique_codes << std::endl;
 
     // h_btree.print();
     h_octree.print();

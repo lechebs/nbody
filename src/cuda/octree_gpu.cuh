@@ -17,7 +17,7 @@ public:
     struct Nodes {
         // Array to store pointers (indices) to the children of each node,
         // each groups of 8 siblings is contiguous in memory
-        int *children;
+        int *first_child;
         // Array to store the number of children of each internal node
         int *num_children;
         // Arrays to store the range of leaves covered by the internal nodes
@@ -32,6 +32,11 @@ public:
     // max_depth ~= btree_height / 3
     Octree(int max_num_nodes);
 
+    void set_max_num_nodes(int max_num_nodes)
+    {
+        _max_num_nodes = max_num_nodes;
+    }
+
     void build(const Btree &btree);
 
     void compute_nodes_barycenter(const Points *points,
@@ -41,7 +46,7 @@ public:
 
     void print()
    {
-        std::vector<int> children(_max_num_nodes * 8);
+        std::vector<int> first_child(_max_num_nodes);
         std::vector<int> num_children(_max_num_nodes);
         std::vector<int> leaves_begin(_max_num_nodes);
         std::vector<int> leaves_end(_max_num_nodes);
@@ -49,9 +54,9 @@ public:
         std::vector<float> y_barycenter(_max_num_nodes);
         std::vector<float> z_barycenter(_max_num_nodes);
 
-        cudaMemcpy(children.data(),
-                   _nodes.children,
-                   sizeof(int) * _max_num_nodes * 8,
+        cudaMemcpy(first_child.data(),
+                   _nodes.first_child,
+                   sizeof(int) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(num_children.data(),
                    _nodes.num_children,
@@ -82,7 +87,7 @@ public:
         {
             printf("%2d: [", i);
             for (int j = 0; j < num_children[i]; ++j) {
-                printf(" %3d", children[j * _max_num_nodes + i]);
+                printf(" %3d", first_child[i] + j);
             }
             printf("] - (%.3f, %.3f, %.3f) - %3d %3d\n",
                    x_barycenter[i], y_barycenter[i], z_barycenter[i],

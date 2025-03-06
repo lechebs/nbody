@@ -9,12 +9,24 @@
 // 3 levels of any subtree of the binary radix tree
 #define _BUILD_STACK_SIZE 16
 
+__device__ __forceinline__ int _traverse(const int *child,
+                                         const int *edge_delta,
+                                         int start_node)
+{
+    int bin_node = start_node;
+
+    do {
+        bin_node = child[bin_node];
+    } while (!edge_delta[bin_node]);
+
+    return bin_node;
+}
+
 __global__ void _build_octree(struct Btree::Nodes btree_nodes,
                               struct Octree::Nodes octree_nodes,
                               const int *btree_octree_map,
                               const int *btree_num_leaves,
-                              int *octree_num_nodes,
-                              int octree_max_num_nodes)
+                              int *octree_num_nodes)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int btree_num_nodes = 2 * *btree_num_leaves - 1;
@@ -45,6 +57,21 @@ __global__ void _build_octree(struct Btree::Nodes btree_nodes,
         return;
     }
 
+    int first_bin_child = _traverse(btree_nodes.left,
+                                    btree_nodes.edge_delta,
+                                    idx);
+
+    int last_bin_child = _traverse(btree_nodes.right,
+                                   btree_nodes.edge_delta,
+                                   idx);
+
+    int first_child = btree_octree_map[first_bin_child];
+    int last_child = btree_octree_map[last_bin_child];
+
+    octree_nodes.first_child[parent] = first_child;
+    octree_nodes.num_children[parent] = last_child - first_child + 1;
+
+    /*
     // Stack used to traverse at most 3 levels
     int stack[_BUILD_STACK_SIZE];
     // Points to last+1 element on the stack
@@ -78,6 +105,7 @@ __global__ void _build_octree(struct Btree::Nodes btree_nodes,
             bin_node = btree_nodes.left[bin_node];
         }
     }
+    */
 }
 
 __global__ void _compute_octree_nodes_barycenter(const Points *points,
@@ -131,7 +159,7 @@ Octree::Octree(int max_num_nodes) : _max_num_nodes(max_num_nodes)
 {
     cudaMalloc(&_num_nodes, sizeof(int));
     // Allocating device memory to store octree nodes
-    cudaMalloc(&_nodes.children, max_num_nodes * 8 * sizeof(int));
+    cudaMalloc(&_nodes.first_child, max_num_nodes * sizeof(int));
     cudaMalloc(&_nodes.num_children, max_num_nodes * sizeof(int));
     cudaMalloc(&_nodes.leaves_begin, max_num_nodes * sizeof(int));
     cudaMalloc(&_nodes.leaves_end, max_num_nodes * sizeof(int));
@@ -148,8 +176,7 @@ void Octree::build(const Btree &btree)
                                          _nodes,
                                          btree.get_d_octree_map(),
                                          btree.get_d_num_leaves_ptr(),
-                                         _num_nodes,
-                                         _max_num_nodes);
+                                         _num_nodes);
 }
 
 void Octree::compute_nodes_barycenter(const Points *points,
@@ -172,7 +199,7 @@ Octree::~Octree()
 {
     cudaFree(_num_nodes);
 
-    cudaFree(_nodes.children);
+    cudaFree(_nodes.first_child);
     cudaFree(_nodes.num_children);
     cudaFree(_nodes.leaves_begin);
     cudaFree(_nodes.leaves_end);

@@ -51,6 +51,11 @@ public:
         return 2 * _max_num_leaves - 1;
     }
 
+    void set_max_num_leaves(int max_num_leaves)
+    {
+        _max_num_leaves = max_num_leaves;
+    }
+
     // Generates leaf nodes such that each contain no more than
     // max_num_points_per_leaf
     void generate_leaves(const uint32_t *d_sorted_codes,
