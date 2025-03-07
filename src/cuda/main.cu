@@ -1,20 +1,7 @@
 #include <iostream>
 
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
-#include <thrust/generate.h>
-#include <thrust/random.h>
-#include <thrust/sort.h>
-#include <thrust/unique.h>
-#include <thrust/scan.h>
-#include <thrust/gather.h>
-
-//#include <cub/device/device_radix_sort.cuh>
-#include <cub/device/device_merge_sort.cuh>
-#include <cub/device/device_run_length_encode.cuh>
-#include <cub/device/device_scan.cuh>
-
 #include "utils_gpu.cuh"
+#include "points_gpu.cuh"
 #include "btree_gpu.cuh"
 #include "octree_gpu.cuh"
 
@@ -22,6 +9,8 @@
 #define TIMER_STOP(msg, start, stop) {                   \
     cudaEventRecord(stop);                               \
     cudaEventSynchronize(stop);                          \
+    std::cout << cudaGetErrorString(cudaGetLastError())  \
+              << std::endl;                              \
     float ms;                                            \
     cudaEventElapsedTime(&ms, start, stop);              \
     std::cout << msg << ": " << ms << "ms" << std::endl; \
@@ -43,175 +32,10 @@ int main()
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
-    thrust::host_vector<float> h_x(NUM_POINTS);
-    thrust::host_vector<float> h_y(NUM_POINTS);
-    thrust::host_vector<float> h_z(NUM_POINTS);
+    Points<float> points(NUM_POINTS);
+    points.sample_uniform();
 
-    thrust::default_random_engine rng(100);
-    // thrust::uniform_real_distribution<float> dist;
-
-    thrust::random::normal_distribution<float> dist(0.5, 0.125);
-
-    auto dist_gen = [&] { return max(0.0f, min(1.0f, dist(rng))); };
-
-    thrust::generate(h_x.begin(), h_x.end(), dist_gen);
-    thrust::generate(h_y.begin(), h_y.end(), dist_gen);
-    thrust::generate(h_z.begin(), h_z.end(), dist_gen);
-
-    // Allocate device memory to store points coordinates
-    thrust::device_vector<float> d_x(h_x);
-    thrust::device_vector<float> d_y(h_y);
-    thrust::device_vector<float> d_z(h_z);
-    float *d_x_ptr = thrust::raw_pointer_cast(&d_x[0]);
-    float *d_y_ptr = thrust::raw_pointer_cast(&d_y[0]);
-    float *d_z_ptr = thrust::raw_pointer_cast(&d_z[0]);
-
-    // Initializes points SoA and copy to device
-    Points h_points(d_x_ptr, d_y_ptr, d_z_ptr);
-    Points *d_points = alloc_device_soa(&h_points, sizeof(Points));
-
-    // Allocate device memory to store morton codes
-    thrust::device_vector<uint32_t> d_codes(NUM_POINTS);
-    uint32_t *d_codes_ptr = thrust::raw_pointer_cast(&d_codes[0]);
-
-    // Kernel launch to compute morton codes of points
-    morton_encode<<<NUM_POINTS / THREADS_PER_BLOCK,
-                    THREADS_PER_BLOCK>>>(d_points, d_codes_ptr);
-
-    LessOp custom_op;
-    // Determine sort tmp storage size
-    void *d_sort_tmp = nullptr;
-    size_t sort_tmp_size;
-    cub::DeviceMergeSort::SortPairs(d_sort_tmp,
-                                    sort_tmp_size,
-                                    d_codes_ptr,
-                                    thrust::make_zip_iterator(d_x_ptr,
-                                                              d_y_ptr,
-                                                              d_z_ptr),
-                                    NUM_POINTS,
-                                    custom_op);
-    // Allocate sort tmp storage
-    cudaMalloc(&d_sort_tmp, sort_tmp_size);
-    // Sorting
-    TIMER_START(start)
-    // Faster than DeviceRadixSort::SortKeys and thrust::sort
-    cub::DeviceMergeSort::SortPairs(d_sort_tmp,
-                                    sort_tmp_size,
-                                    d_codes_ptr,
-                                    thrust::make_zip_iterator(d_x_ptr,
-                                                              d_y_ptr,
-                                                              d_z_ptr),
-                                    NUM_POINTS,
-                                    custom_op);
-    TIMER_STOP("sort-codes", start, stop)
-    cudaFree(d_sort_tmp);
-
-    /*
-    h_x = d_x;
-    h_y = d_y;
-    h_z = d_z;
-    for (int i = 0; i < NUM_POINTS; ++i) {
-        printf("[%3d] (%.3f, %.3f, %.3f)\n", i, h_x[i], h_y[i], h_z[i]);
-    }
-    */
-
-    // Allocating Btree for NUM_POINTS number of leaves,
-    // the actual number of leaves will be smaller
-    Btree h_btree(NUM_POINTS);
-
-    // Obtaining unique codes and counting occurrences
-    // using run-length encoding
-    thrust::device_vector<uint32_t> d_unique_codes(NUM_POINTS);
-    thrust::device_vector<int> d_codes_occurrences(NUM_POINTS);
-    uint32_t *d_unique_codes_ptr =
-        thrust::raw_pointer_cast(&d_unique_codes[0]);
-    int *d_codes_occurrences_ptr =
-        thrust::raw_pointer_cast(&d_codes_occurrences[0]);
-
-    int *d_num_unique_codes = h_btree.get_d_num_leaves_ptr();
-
-    void *d_runlength_tmp = nullptr;
-    size_t runlength_tmp_size;
-    cub::DeviceRunLengthEncode::Encode(d_runlength_tmp,
-                                       runlength_tmp_size,
-                                       d_codes_ptr,
-                                       d_unique_codes_ptr,
-                                       d_codes_occurrences_ptr,
-                                       d_num_unique_codes,
-                                       NUM_POINTS);
-    cudaMalloc(&d_runlength_tmp, runlength_tmp_size);
-
-    TIMER_START(start)
-    cub::DeviceRunLengthEncode::Encode(d_runlength_tmp,
-                                       runlength_tmp_size,
-                                       d_codes_ptr,
-                                       d_unique_codes_ptr,
-                                       d_codes_occurrences_ptr,
-                                       d_num_unique_codes,
-                                       NUM_POINTS);
-    TIMER_STOP("run-length", start, stop)
-    cudaFree(d_runlength_tmp);
-
-    int h_num_unique_codes;
-    cudaMemcpy(&h_num_unique_codes,
-               d_num_unique_codes,
-               sizeof(int),
-               cudaMemcpyDeviceToHost);
-    std::cout << "num_unique_codes=" << h_num_unique_codes << std::endl;
-
-    // Computing exclusive scan of d_codes_occurrences
-    thrust::device_vector<int> d_scan_codes_occurrences(NUM_POINTS);
-    int *d_scan_codes_occurrences_ptr =
-        thrust::raw_pointer_cast(&d_scan_codes_occurrences[0]);
-
-    void *d_scan_tmp = nullptr;
-    size_t scan_tmp_size;
-    cub::DeviceScan::ExclusiveSum(d_scan_tmp,
-                                  scan_tmp_size,
-                                  d_codes_occurrences_ptr,
-                                  d_scan_codes_occurrences_ptr,
-                                  NUM_POINTS);
-    cudaMalloc(&d_scan_tmp, scan_tmp_size);
-
-    TIMER_START(start)
-    cub::DeviceScan::ExclusiveSum(d_scan_tmp,
-                                  scan_tmp_size,
-                                  d_codes_occurrences_ptr,
-                                  d_scan_codes_occurrences_ptr,
-                                  NUM_POINTS);
-    TIMER_STOP("codes-scan", start, stop)
-
-    // We can use the same tmp storage to scan point coordinates
-    // as long as we're dealing with 32 bit floats
-    thrust::device_vector<float> d_scan_x(NUM_POINTS);
-    thrust::device_vector<float> d_scan_y(NUM_POINTS);
-    thrust::device_vector<float> d_scan_z(NUM_POINTS);
-    float *d_scan_x_ptr = thrust::raw_pointer_cast(&d_scan_x[0]);
-    float *d_scan_y_ptr = thrust::raw_pointer_cast(&d_scan_y[0]);
-    float *d_scan_z_ptr = thrust::raw_pointer_cast(&d_scan_z[0]);
-
-    TIMER_START(start)
-    // TODO: parallelize over multiple streams?
-    cub::DeviceScan::ExclusiveSum(d_scan_tmp,
-                                  scan_tmp_size,
-                                  d_x_ptr,
-                                  d_scan_x_ptr,
-                                  NUM_POINTS);
-    cub::DeviceScan::ExclusiveSum(d_scan_tmp,
-                                  scan_tmp_size,
-                                  d_y_ptr,
-                                  d_scan_y_ptr,
-                                  NUM_POINTS);
-    cub::DeviceScan::ExclusiveSum(d_scan_tmp,
-                                  scan_tmp_size,
-                                  d_z_ptr,
-                                  d_scan_z_ptr,
-                                  NUM_POINTS);
-    TIMER_STOP("points-scan", start, stop)
-    cudaFree(d_scan_tmp);
-
-    Points h_scan_points(d_scan_x_ptr, d_scan_y_ptr, d_scan_z_ptr);
-    Points *d_scan_points = alloc_device_soa(&h_scan_points, sizeof(Points));
+    Btree btree(NUM_POINTS);
 
     // If the octree is completely unbalanced, the number of internal
     // nodes should be O((NUM_POINTS-1) / 3), while if it is completely
@@ -222,19 +46,33 @@ int main()
     // one point only, the number of internal nodes will actually be much
     // smaller
 
-    int num_octree_internal = min(
+    int num_octree_nodes = min(
         2 * NUM_POINTS,
         geometric_sum(8, ceil(log2(NUM_POINTS) / 3.0) + 1));
-    Octree h_octree(num_octree_internal);
-
-    thrust::device_vector<int> d_leaf_first_code_idx(NUM_POINTS + 1);
-    int *d_leaf_first_code_idx_ptr =
-        thrust::raw_pointer_cast(&d_leaf_first_code_idx[0]);
+    Octree<float> octree(num_octree_nodes);
 
     TIMER_START(start)
-    h_btree.generate_leaves(d_unique_codes_ptr,
-                            d_leaf_first_code_idx_ptr,
-                            MAX_CODES_PER_LEAF);
+    points.compute_morton_codes();
+    TIMER_STOP("morton", start, stop);
+
+    TIMER_START(start)
+    points.sort_by_codes();
+    TIMER_STOP("sort-codes", start, stop)
+
+    TIMER_START(start)
+    points.compute_unique_codes(btree.get_d_num_leaves_ptr());
+    TIMER_STOP("run-length", start, stop)
+
+    int num_unique_codes = btree.get_num_leaves();
+    std::cout << "num_unique_codes=" << num_unique_codes << std::endl;
+
+    TIMER_START(start)
+    points.scan_attributes();
+    TIMER_STOP("points-scan", start, stop)
+
+    TIMER_START(start)
+    btree.generate_leaves(points.get_d_unique_codes_ptr(),
+                          MAX_CODES_PER_LEAF);
     TIMER_STOP("btree-leaves", start, stop)
 
     /*
@@ -247,52 +85,41 @@ int main()
     */
 
     TIMER_START(start);
-    cudaMemcpy(&h_num_unique_codes,
-               h_btree.get_d_num_leaves_ptr(),
-               sizeof(int),
-               cudaMemcpyDeviceToHost);
+    int num_leaves = btree.get_num_leaves();
     TIMER_STOP("memcpy-num-leaves", start, stop);
-    std::cout << "num_leaves=" << h_num_unique_codes << std::endl;
+    std::cout << "num_leaves=" << num_leaves << std::endl;
 
     // Setting max values to actual ones to speedup kernel launches
-    h_btree.set_max_num_leaves(h_num_unique_codes);
-    h_octree.set_max_num_nodes(h_btree.get_max_num_nodes());
+    btree.set_max_num_leaves(num_leaves);
+    octree.set_max_num_nodes(btree.get_max_num_nodes());
 
     TIMER_START(start)
-    h_btree.build(d_unique_codes_ptr, d_leaf_first_code_idx_ptr);
+    btree.build(points.get_d_unique_codes_ptr());
     TIMER_STOP("btree-build", start, stop)
-
 
     // WARNING: Perhaps sort octree instead?
     // Octree nodes are ~1/3 of the btree nodes,
     // sorting would be faster
 
     TIMER_START(start)
-    h_btree.sort_to_bfs_order();
+    btree.sort_to_bfs_order();
     TIMER_STOP("btree-sort", start, stop)
 
     TIMER_START(start)
-    h_btree.compute_octree_map();
+    btree.compute_octree_map();
     TIMER_STOP("btree-scan", start, stop)
 
     TIMER_START(start)
-    h_octree.build(h_btree);
+    octree.build(btree);
     TIMER_STOP("octree-build", start, stop)
 
     TIMER_START(start)
-    h_octree.compute_nodes_barycenter(d_points,
-                                      d_scan_points,
-                                      d_leaf_first_code_idx_ptr,
-                                      d_scan_codes_occurrences_ptr);
+    octree.compute_nodes_barycenter(points,
+                                    btree.get_d_leaf_first_code_idx_ptr());
     TIMER_STOP("octree-barycenters", start, stop)
 
     // h_btree.print();
-    h_octree.print();
-
-    std::cout << cudaGetErrorString(cudaGetLastError()) << std::endl;
-
-    cudaFree(d_points);
-    cudaFree(d_scan_points);
+    octree.print();
 
     return 0;
 }

@@ -1,37 +1,31 @@
 #ifndef UTILS_GPU_CUH
 #define UTILS_GPU_CUH
 
+typedef unsigned int uint32_t;
+
 constexpr int THREADS_PER_BLOCK = 32;
 // TODO: compute it such that a SM is fully utilized
 constexpr int MAX_THREADS_PER_BLOCK = 512;
 
-// Allocates device memory to store SoA
-// and copies member data from host
-template<class T>
-T *alloc_device_soa(T *data, std::size_t size)
+template<typename T> struct SoAVec3
 {
-    void *device_data;
+    void alloc(int n)
+    {
+        cudaMalloc(&x, n * sizeof(T));
+        cudaMalloc(&y, n * sizeof(T));
+        cudaMalloc(&z, n * sizeof(T));
+    }
 
-    cudaMalloc(&device_data, size);
-    cudaMemcpy(device_data, data, size, cudaMemcpyHostToDevice);
+    void free()
+    {
+        cudaFree(x);
+        cudaFree(y);
+        cudaFree(z);
+    }
 
-    return (T *) device_data;
-}
-
-// SoA to store the points coordinates, allows coalescing
-class Points
-{
-public:
-    Points(float *x, float *y, float *z) : _x(x), _y(y), _z(z) {}
-
-    __device__ __forceinline__ float get_x(int idx) const { return _x[idx]; }
-    __device__ __forceinline__ float get_y(int idx) const { return _y[idx]; }
-    __device__ __forceinline__ float get_z(int idx) const { return _z[idx]; }
-
-private:
-    float *_x;
-    float *_y;
-    float *_z;
+    T *x;
+    T *y;
+    T *z;
 };
 
 struct LessOp
@@ -65,9 +59,9 @@ inline int geometric_sum(int base, int n)
     return (1 - pow) / (1 - base);
 }
 
-inline void swap_ptr(int **ptr1, int **ptr2)
+template<typename T> void swap_ptr(T **ptr1, T **ptr2)
 {
-    int *tmp = *ptr1;
+    T *tmp = *ptr1;
     *ptr1 = *ptr2;
     *ptr2 = tmp;
 }

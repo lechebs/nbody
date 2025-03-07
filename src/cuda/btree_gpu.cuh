@@ -6,27 +6,29 @@
 #include <iostream>
 #include <vector>
 
-typedef unsigned int uint32_t;
+struct SoABtreeNodes
+{
+    void alloc(int num_nodes);
+    void free();
+
+    int *parent;
+    int *depth;
+
+    int *left;
+    int *right;
+    int *edge_delta;
+    int *leaves_begin;
+    int *leaves_end;
+};
 
 // SoA to store the binary radix tree
 class Btree
 {
 // TODO: consider converting to unsigned int
 public:
-    struct Nodes {
-        int *parent;
-        int *depth;
-
-        int *left;
-        int *right;
-        int *edge_delta;
-        int *leaves_begin;
-        int *leaves_end;
-    };
-
     Btree(int max_num_leaves);
 
-    struct Nodes get_d_nodes() const
+    const SoABtreeNodes &get_d_nodes() const
     {
         return _nodes;
     }
@@ -36,9 +38,26 @@ public:
         return _num_leaves;
     }
 
-    const int *get_d_octree_map() const
+    const int *get_d_leaf_first_code_idx_ptr() const
+    {
+        return _leaf_first_code_idx;
+    }
+
+    const int *get_d_octree_map_ptr() const
     {
         return _octree_map;
+    }
+
+    int get_num_leaves() const
+    {
+        int num_leaves;
+
+        cudaMemcpy(&num_leaves,
+                   _num_leaves,
+                   sizeof(int),
+                   cudaMemcpyDeviceToHost);
+
+        return num_leaves;
     }
 
     int get_max_num_internal() const
@@ -59,12 +78,10 @@ public:
     // Generates leaf nodes such that each contain no more than
     // max_num_points_per_leaf
     void generate_leaves(const uint32_t *d_sorted_codes,
-                         int *d_leaf_first_code_idx,
                          int max_num_codes_per_leaf);
 
     // Builds the binary radix tree given the sorted morton encoded codes
-    void build(const uint32_t *d_sorted_codes,
-               const int *d_leaf_first_code_idx);
+    void build(const uint32_t *d_sorted_codes);
 
     // Sorts internal nodes by depth to allow efficient bfs traversal
     void sort_to_bfs_order();
@@ -137,10 +154,13 @@ private:
     int _max_num_leaves;
     int *_num_leaves;
 
-    // Wrapper to nodes arrays
-    Nodes _nodes;
-    Nodes _tmp_nodes;
+    SoABtreeNodes _nodes;
+    SoABtreeNodes _tmp_nodes;
 
+    // Contains the index of the first code covered by each leaf
+    int *_leaf_first_code_idx;
+    // Stores the index of the corresponding octree node
+    // for the btree nodes whose edge_delta is > 0
     int *_octree_map;
 
     // Buffers used for temporary storage
@@ -158,7 +178,5 @@ private:
 
     int _num_launches_compute_nodes_depth;
 };
-
-__global__ void morton_encode(const Points *points, uint32_t *codes);
 
 #endif

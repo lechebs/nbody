@@ -2,33 +2,30 @@
 #define OCTREE_GPU_CUH
 
 #include "btree_gpu.cuh"
+#include "points_gpu.cuh"
 #include "utils_gpu.cuh"
 
 #include <iostream>
 #include <vector>
 
-// TODO: consider having distinct cpu and gpu
-// copies of the object
+struct SoAOctreeNodes
+{
+    void alloc(int num_nodes);
+    void free();
+
+    // Array to store the index of the first child of each node
+    int *first_child;
+    // Array to store the number of children of each node
+    int *num_children;
+    // Arrays to store the range of leaves covered by each node
+    int *leaves_begin;
+    int *leaves_end;
+};
 
 // SoA to store the octree
-class Octree
+template<typename T> class Octree
 {
 public:
-    struct Nodes {
-        // Array to store pointers (indices) to the children of each node,
-        // each groups of 8 siblings is contiguous in memory
-        int *first_child;
-        // Array to store the number of children of each internal node
-        int *num_children;
-        // Arrays to store the range of leaves covered by the internal nodes
-        int *leaves_begin;
-        int *leaves_end;
-        // Barycenter coordinates of the points within each node
-        float *x_barycenter;
-        float *y_barycenter;
-        float *z_barycenter;
-    };
-
     // max_depth ~= btree_height / 3
     Octree(int max_num_nodes);
 
@@ -39,10 +36,8 @@ public:
 
     void build(const Btree &btree);
 
-    void compute_nodes_barycenter(const Points *points,
-                                  const Points *scan_points,
-                                  const int *leaf_first_code_idx,
-                                  const int *scan_codes_occurrences);
+    void compute_nodes_barycenter(Points<T> &points,
+                                  const int *leaf_first_code_idx);
 
     void print()
    {
@@ -71,15 +66,15 @@ public:
                    sizeof(int) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(x_barycenter.data(),
-                   _nodes.x_barycenter,
+                   _barycenters.x,
                    sizeof(float) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(y_barycenter.data(),
-                   _nodes.y_barycenter,
+                   _barycenters.y,
                    sizeof(float) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(z_barycenter.data(),
-                   _nodes.z_barycenter,
+                   _barycenters.z,
                    sizeof(float) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
 
@@ -103,7 +98,9 @@ private:
 
     int *_num_nodes;
 
-    Nodes _nodes;
+    SoAOctreeNodes _nodes;
+    // Barycenter coordinates of the points within each node
+    SoAVec3<T> _barycenters;
 };
 
 #endif

@@ -2,9 +2,8 @@
 
 #include "utils_gpu.cuh"
 
-#include <thrust/device_vector.h>
-#include <thrust/device_ptr.h>
-#include <thrust/sort.h>
+#include <thrust/execution_policy.h>
+#include <thrust/scan.h>
 #include <thrust/scatter.h>
 #include <thrust/gather.h>
 #include <thrust/sequence.h>
@@ -12,34 +11,26 @@
 #include <cub/device/device_merge_sort.cuh>
 #include <cub/device/device_partition.cuh>
 
-__device__ __forceinline__ uint32_t _expand_bits(uint32_t u)
+void SoABtreeNodes::alloc(int num_nodes)
 {
-    u = (u * 0x00010001u) & 0xFF0000FFu;
-    u = (u * 0x00000101u) & 0x0F00F00Fu;
-    u = (u * 0x00000011u) & 0xC30C30C3u;
-    u = (u * 0x00000005u) & 0x49249249u;
-
-    return u;
+    cudaMalloc(&parent, num_nodes * sizeof(int));
+    cudaMalloc(&depth, num_nodes * sizeof(int));
+    cudaMalloc(&left, num_nodes * sizeof(int));
+    cudaMalloc(&right, num_nodes * sizeof(int));
+    cudaMalloc(&edge_delta, num_nodes * sizeof(int));
+    cudaMalloc(&leaves_begin, num_nodes * sizeof(int));
+    cudaMalloc(&leaves_end, num_nodes * sizeof(int));
 }
 
-// Computes 30-bit morton code by interleaving the bits
-// of the coordinates, supposing that they are normalized
-// in the range [0.0, 1.0]
-__global__ void morton_encode(const Points *points, uint32_t *codes)
+void SoABtreeNodes::free()
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    // Scale coordinates to [0, 2^10)
-    uint32_t x = (uint32_t) (points->get_x(idx) * 1023.0f);
-    uint32_t y = (uint32_t) (points->get_y(idx) * 1023.0f);
-    uint32_t z = (uint32_t) (points->get_z(idx) * 1023.0f);
-
-    x = _expand_bits(x);
-    y = _expand_bits(y);
-    z = _expand_bits(z);
-
-    // Left shift x by 2 bits, y by 1 bit, then bitwise or
-    codes[idx] = x * 4 + y * 2 + z;
+    cudaFree(parent);
+    cudaFree(depth);
+    cudaFree(left);
+    cudaFree(right);
+    cudaFree(edge_delta);
+    cudaFree(leaves_begin);
+    cudaFree(leaves_end);
 }
 
 // Computes the longes common prefix between
@@ -118,7 +109,7 @@ __device__ int _search_lr(const uint32_t *codes,
 }
 
 __device__ void _set_node_child(const uint32_t *codes,
-                                struct Btree::Nodes nodes,
+                                SoABtreeNodes nodes,
                                 int *child,
                                 int parent_idx,
                                 int child_idx,
@@ -229,7 +220,7 @@ __global__ void _merge_leaves(const uint32_t *codes,
 
 // TODO: improve coalescence
 __global__ void _build_radix_tree(const uint32_t *codes,
-                                  struct Btree::Nodes nodes,
+                                  SoABtreeNodes nodes,
                                   int *tmp_ranges,
                                   const int *num_leaves_,
                                   int max_num_internal,
@@ -411,24 +402,13 @@ Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
 {
     cudaMalloc(&_num_leaves, sizeof(int));
     cudaMalloc(&_range, (max_num_leaves + 1) * sizeof(int));
-    // Allocating device memory for internal nodes
-    cudaMalloc(&_nodes.parent, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_nodes.depth, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_nodes.left, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_nodes.right, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_nodes.leaves_begin, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_nodes.leaves_end, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_nodes.edge_delta, get_max_num_nodes() * sizeof(int));
 
-    cudaMalloc(&_tmp_nodes.parent, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_tmp_nodes.depth, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_tmp_nodes.left, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_tmp_nodes.right, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_tmp_nodes.leaves_begin, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_tmp_nodes.leaves_end, get_max_num_nodes() * sizeof(int));
-    cudaMalloc(&_tmp_nodes.edge_delta, get_max_num_nodes() * sizeof(int));
+    // Allocating device memory for internal nodes
+    _nodes.alloc(get_max_num_nodes());
+    _tmp_nodes.alloc(get_max_num_nodes());
 
     cudaMalloc(&_octree_map, get_max_num_nodes() * sizeof(int));
+    cudaMalloc(&_leaf_first_code_idx, (max_num_leaves + 1) * sizeof(int));
 
     // Allocating buffers to store intermediate computations
     // TODO: align inner buffers
@@ -451,7 +431,7 @@ Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
                                   _tmp_compact_size,
                                   _tmp_ranges,
                                   _tmp,
-                                  _tmp,
+                                  _leaf_first_code_idx,
                                   _num_leaves,
                                   max_num_leaves + 1);
     cudaMalloc(&_tmp_compact, _tmp_compact_size);
@@ -470,7 +450,6 @@ Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
 }
 
 void Btree::generate_leaves(const uint32_t *d_sorted_codes,
-                            int *d_leaf_first_code_idx,
                             int max_num_codes_per_leaf)
 {
     int *leaf_depth = _tmp;
@@ -502,13 +481,12 @@ void Btree::generate_leaves(const uint32_t *d_sorted_codes,
                                   _tmp_compact_size,
                                   tmp_range_out,
                                   leaf_flagged,
-                                  d_leaf_first_code_idx,
+                                  _leaf_first_code_idx,
                                   _num_leaves,
                                   _max_num_leaves + 1);
 }
 
-void Btree::build(const uint32_t *d_sorted_codes,
-                  const int *d_leaf_first_code_idx)
+void Btree::build(const uint32_t *d_sorted_codes)
 {
     // WARNING: watch out when gathering values from
     // the rear of d_leaf_first_code, it should probably be
@@ -516,8 +494,8 @@ void Btree::build(const uint32_t *d_sorted_codes,
     uint32_t *leaf_first_code = reinterpret_cast<uint32_t *>(_tmp);
 
     thrust::gather(thrust::device,
-                   d_leaf_first_code_idx,
-                   d_leaf_first_code_idx + _max_num_leaves,
+                   _leaf_first_code_idx,
+                   _leaf_first_code_idx + _max_num_leaves,
                    d_sorted_codes,
                    leaf_first_code);
 
@@ -589,7 +567,7 @@ void Btree::sort_to_bfs_order()
         // It's faster to gather the arrays to be sorted
         // based on the sorted permutation
         // TODO: gather on multiple streams?
-    thrust::gather(thrust::device,
+        thrust::gather(thrust::device,
                        tmp_perm_in,
                        tmp_perm_in + get_max_num_nodes(),
                        *in_ptrs[i],
@@ -632,20 +610,10 @@ Btree::~Btree()
     // Releasing device memory
     cudaFree(_num_leaves);
 
-    cudaFree(_nodes.parent);
-    cudaFree(_nodes.left);
-    cudaFree(_nodes.right);
-    cudaFree(_nodes.leaves_begin);
-    cudaFree(_nodes.leaves_end);
-    cudaFree(_nodes.edge_delta);
+    _nodes.free();
+    _tmp_nodes.free();
 
-    cudaFree(_tmp_nodes.parent);
-    cudaFree(_tmp_nodes.left);
-    cudaFree(_tmp_nodes.right);
-    cudaFree(_tmp_nodes.leaves_begin);
-    cudaFree(_tmp_nodes.leaves_end);
-    cudaFree(_tmp_nodes.edge_delta);
-
+    cudaFree(_leaf_first_code_idx);
     cudaFree(_octree_map);
 
     cudaFree(_tmp);
