@@ -1,9 +1,9 @@
 #include <iostream>
 
-#include "utils_gpu.cuh"
-#include "points_gpu.cuh"
-#include "btree_gpu.cuh"
-#include "octree_gpu.cuh"
+#include "cuda/utils_gpu.cuh"
+#include "cuda/points_gpu.cuh"
+#include "cuda/btree_gpu.cuh"
+#include "cuda/octree_gpu.cuh"
 
 #define TIMER_START(start) cudaEventRecord(start);
 #define TIMER_STOP(msg, start, stop) {                   \
@@ -17,7 +17,7 @@
 }
 
 constexpr int NUM_POINTS = 2 << 18;
-constexpr int MAX_CODES_PER_LEAF = 32;
+constexpr int MAX_CODES_PER_LEAF = 16;
 
 void print_bits(uint32_t u)
 {

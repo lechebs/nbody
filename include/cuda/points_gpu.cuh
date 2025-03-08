@@ -3,8 +3,6 @@
 
 #include "utils_gpu.cuh"
 
-#include <iostream>
-
 #include <thrust/execution_policy.h>
 #include <thrust/device_ptr.h>
 #include <thrust/host_vector.h>
@@ -124,8 +122,9 @@ public:
         thrust::host_vector<T> y(_num_points);
         thrust::host_vector<T> z(_num_points);
 
-        thrust::uniform_real_distribution<T> dist;
-        auto dist_gen = [&] { return dist(_rng); };
+        // thrust::uniform_real_distribution<T> dist;
+        thrust::normal_distribution<T> dist(0.5, 0.125);
+        auto dist_gen = [&] { return max(0.0, min(1.0, dist(_rng))); };
 
         thrust::generate(x.begin(), x.end(), dist_gen);
         thrust::generate(y.begin(), y.end(), dist_gen);

@@ -1,6 +1,6 @@
-#include "btree_gpu.cuh"
+#include "cuda/btree_gpu.cuh"
 
-#include "utils_gpu.cuh"
+#include "cuda/utils_gpu.cuh"
 
 #include <thrust/execution_policy.h>
 #include <thrust/scan.h>

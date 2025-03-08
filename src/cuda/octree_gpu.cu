@@ -1,8 +1,8 @@
-#include "octree_gpu.cuh"
+#include "cuda/octree_gpu.cuh"
 
-#include "btree_gpu.cuh"
-#include "points_gpu.cuh"
-#include "utils_gpu.cuh"
+#include "cuda/btree_gpu.cuh"
+#include "cuda/points_gpu.cuh"
+#include "cuda/utils_gpu.cuh"
 
 #include <iostream>
 
