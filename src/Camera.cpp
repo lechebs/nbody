@@ -43,6 +43,7 @@ void Camera::setPosition(const vec3 &position)
 void Camera::setSphericalPosition(const vec3 &position)
 {
     _spherical_position = position;
+    _sphericalToCartesian();
 }
 
 void Camera::setFrameOfReference(const vec3 &u, const vec3 &v, const vec3 &n)
@@ -80,6 +81,11 @@ void Camera::move(const vec3 &delta)
     _target_position += camera_delta;
 }
 
+void Camera::orbit(const vec3 &delta)
+{
+    _spherical_position -= delta;
+}
+
 void Camera::update(float dt)
 {
     if (_orbit_mode) {
@@ -112,8 +118,8 @@ void Camera::_computeWorldToCamera()
 
 void Camera::_computePerspectiveProjection(float fovy,
                                            float aspect_ratio,
-                                           float far,
-                                           float near)
+                                           float near,
+                                           float far)
 {
     mat4 &mat = _perspectiveProjection;
 
@@ -121,11 +127,11 @@ void Camera::_computePerspectiveProjection(float fovy,
     mat(1, 1) = 1 / std::tan(fovy / 2);
     mat(2, 2) = - (near + far) / (far - near);
     mat(2, 3) = 2 * near * far / (far - near);
-    mat(3, 2) = -1.0;
+    mat(3, 2) = - 1.0;
 }
 
 void Camera::_sphericalToCartesian()
-{
+{ // TODO: clamp values
     float theta = _spherical_position[1];
     float phi = _spherical_position[2];
 
