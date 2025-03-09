@@ -5,6 +5,7 @@
 #include "cuda/utils_gpu.cuh"
 
 #include <iostream>
+#include <cmath>
 
 // At most 15 nodes can be visited by traversing
 // 3 levels of any subtree of the binary radix tree
@@ -138,13 +139,16 @@ _compute_octree_nodes_barycenter(const SoAVec3<T> points,
     // The prefix sum of the mass array needs to be computed as well
 }
 
-template<typename T> Octree<T>::Octree(int max_num_nodes) :
-    _max_num_nodes(max_num_nodes)
+template<typename T> Octree<T>::Octree(int max_num_leaves)
 {
+    _max_num_nodes = min(
+        2 * max_num_leaves,
+        geometric_sum(8, ceil(log2(max_num_leaves) / 3.0) + 1.0));
+
     cudaMalloc(&_num_nodes, sizeof(int));
 
-    _nodes.alloc(max_num_nodes);
-    _barycenters.alloc(max_num_nodes);
+    _nodes.alloc(_max_num_nodes);
+    _barycenters.alloc(_max_num_nodes);
 }
 
 template<typename T> void Octree<T>::build(const Btree &btree)

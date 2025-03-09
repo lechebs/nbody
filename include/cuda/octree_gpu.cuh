@@ -27,7 +27,7 @@ template<typename T> class Octree
 {
 public:
     // max_depth ~= btree_height / 3
-    Octree(int max_num_nodes);
+    Octree(int max_num_leaves);
 
     void set_max_num_nodes(int max_num_nodes)
     {

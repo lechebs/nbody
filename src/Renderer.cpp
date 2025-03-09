@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <vector>
+#include <memory>
 
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
@@ -14,8 +15,9 @@
 #include "Vector.hpp"
 #include "Camera.hpp"
 #include "ShaderProgram.hpp"
+#include "CUDAWrappers.hpp"
 
-constexpr unsigned int N = 600;
+constexpr unsigned int N_POINTS = 2 << 12;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -25,10 +27,10 @@ Renderer::Renderer(unsigned int window_width,
     _window_width(window_width),
     _window_height(window_height),
     _window_title("nbody"),
-    _camera(M_PI / 2,
+    _camera(M_PI / 3,
             static_cast<float>(window_width) / window_height,
-            -0.1,
-            -100.0) {}
+            -0.01,
+            -10.0) {}
 
 bool Renderer::init()
 {
@@ -42,49 +44,16 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    std::ifstream sim_data_raw("bodyData.txt");
-    // Read bodies count
-    int n_bodies;
-    sim_data_raw >> n_bodies;
+    CUDAWrappers::BarnesHut::Params p = { N_POINTS, 1 };
+    CUDAWrappers::BarnesHut simulation(p, _particles_ssbo);
+    simulation.samplePoints();
 
-    std::vector<std::array<float, 4>> sim_data;
-    sim_data.reserve(n_bodies * 1001);
-    std::cout << sim_data.size() << std::endl;
-
-    // Read masses
-    for (int i = 0; i < n_bodies; ++i) {
-        float mass;
-        sim_data_raw >> mass;
-    }
-
-    // For each timestep
-    for (int i = 0; i <= 1001; ++i) {
-        for (int j = 0; j < n_bodies; ++j) {
-            int idx = i * n_bodies + j;
-            sim_data_raw >> sim_data[idx][0];
-            sim_data_raw >> sim_data[idx][1];
-            sim_data[idx][2] = 0.0f;
-            sim_data[idx][3] = 1.0f; // mass
-        }
-    }
-
-    int timestep = 0;
-    int frames = 0;
+    simulation.update();
 
     while (_running) {
         _handleEvents();
         _updateDeltaTime();
 
-        // Copying updated positions to GPU memory.
-        glBufferData(GL_SHADER_STORAGE_BUFFER,
-                 n_bodies * sizeof(std::array<float, 4>),
-                 sim_data.data() + timestep * n_bodies,
-                 GL_DYNAMIC_DRAW);
-
-        if (frames == 0)
-            timestep = (timestep + 1) % 1000;
-
-        frames = (frames + 1) % 1;
 
         _updateCamera();
         _renderFrame();
@@ -215,17 +184,18 @@ void Renderer::_allocBuffers()
     };
     */
 
-    // Creating a Shader Storage Buffer Object to store particles data.
-    glGenBuffers(1, &_particles_ssbo);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, _particles_ssbo);
-    // Copying particles data to GPU memory.
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, _particles_ssbo);
-    /*
-    glBufferData(GL_SHADER_STORAGE_BUFFER,
-                 sizeof(particles_data),
-                 particles_data.data(),
-                 GL_DYNAMIC_DRAW);
-    */
+    const std::array<float, N_POINTS> dummy = {};
+    // Creating Shader Storage Buffer Objects to store particles data.
+    for (int i = 0; i < 3; ++i) {
+        glGenBuffers(1, &_particles_ssbo[i]);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, _particles_ssbo[i]);
+        // Copying particles data to GPU memory to define size
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, _particles_ssbo[i]);
+        glBufferData(GL_SHADER_STORAGE_BUFFER,
+                     sizeof(dummy),
+                     dummy.data(),
+                     GL_DYNAMIC_DRAW);
+    }
 }
 
 // Sets OpenGL rendering options, arranges the scene
@@ -235,15 +205,18 @@ void Renderer::_setupScene()
     // respect to the window coordinates
     glViewport(0, 0, _window_width, _window_height);
     // Sets clear color
-    glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
+    glClearColor(0.05f, 0.05f, 0.05f, 0.0f);
     // Enabling transparency
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // Enabling depth testing
+    glEnable(GL_DEPTH_TEST);
 
-    _camera.setPosition({ 0.0f, 0.0f, -3.0f });
+    //_camera.setPosition({ 0.0f, 0.0f, -1.0f });
+    _camera.setSphericalPosition({ 3.0f, 0.0f, 0.0f });
     _camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
 
-    _camera.setOrbitMode(false);
+    _camera.setOrbitMode(true);
 
     _shader_program.loadUniformMat4("perspective_projection",
                                     _camera.getPerspectiveProjection());
@@ -264,8 +237,9 @@ void Renderer::_handleEvents()
             quit();
         } else if (event.type == SDL_MOUSEWHEEL) {
             // Zooming camera
-            vec3 zoom_delta({ 0, 0, event.wheel.preciseY });
-            _camera.move(zoom_delta);
+            vec3 zoom_delta({ 0, 0, 0.1f * event.wheel.preciseY });
+            // _camera.move(zoom_delta);
+            _camera.orbit({ 0.1f * event.wheel.preciseY, 0, 0 });
         }
     }
 
@@ -284,7 +258,12 @@ void Renderer::_handleEvents()
             0
         });
         // Translating camera
-        _camera.move(normalized_mouse_delta);
+        // _camera.move(normalized_mouse_delta);
+
+        _camera.orbit({
+            0, normalized_mouse_delta[1], normalized_mouse_delta[0] });
+        _camera.update(0.0);
+        _camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
     }
 
     prev_mouse_x = mouse_x;
@@ -314,9 +293,9 @@ void Renderer::_renderFrame()
 {
     _shader_program.enable();
 
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     // glBindVertexArray(_quad_vao);
-    glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, N);
+    glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, N_POINTS);
 
     SDL_GL_SwapWindow(_window);
 }

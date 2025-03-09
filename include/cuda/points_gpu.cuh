@@ -53,47 +53,24 @@ template<typename T> __global__ void _morton_encode(SoAVec3<T> pos,
 template<typename T> class Points
 {
 public:
-    Points(int num_points) : _num_points(num_points), _rng(_SEED)
+    Points(int num_points) :
+        _num_points(num_points),
+        _rng(_SEED),
+        _gl_buffers(false)
     {
         _pos.alloc(num_points);
-        _tmp_pos.alloc(num_points);
-        _scan_pos.alloc(num_points);
+        _init(num_points);
+    }
 
-        cudaMalloc(&_codes, num_points * sizeof(uint32_t));
-        cudaMalloc(&_unique_codes, num_points * sizeof(uint32_t));
-        cudaMalloc(&_codes_occurrences, num_points * sizeof(int));
-        cudaMalloc(&_codes_first_point_idx, num_points * sizeof(int));
-
-        cudaMalloc(&_range, num_points * sizeof(int));
-
-        // Determining and allocating storage for cub operations
-        _tmp_sort = nullptr;
-        cub::DeviceMergeSort::SortPairs(_tmp_sort,
-                                        _tmp_sort_size,
-                                        _codes,
-                                        _range,
-                                        num_points,
-                                        less_op);
-        cudaMalloc(&_tmp_sort, _tmp_sort_size);
-
-        int *tmp = nullptr;
-        _tmp_runlength = nullptr;
-        cub::DeviceRunLengthEncode::Encode(_tmp_runlength,
-                                           _tmp_runlength_size,
-                                           _codes,
-                                           _unique_codes,
-                                           _codes_occurrences,
-                                           tmp,
-                                           num_points);
-        cudaMalloc(&_tmp_runlength, _tmp_runlength_size);
-
-        _tmp_scan = nullptr;
-        cub::DeviceScan::ExclusiveSum(_tmp_scan,
-                                      _tmp_scan_size,
-                                      _codes_occurrences,
-                                      _codes_first_point_idx,
-                                      num_points);
-        cudaMalloc(&_tmp_scan, _tmp_scan_size);
+    Points(int num_points, T *x, T *y, T *z) :
+        _num_points(num_points),
+        _rng(_SEED),
+        _gl_buffers(true)
+    {
+        _pos.x = x;
+        _pos.y = y;
+        _pos.z = z;
+        _init(num_points);
     }
 
     uint32_t *get_d_unique_codes_ptr()
@@ -122,8 +99,8 @@ public:
         thrust::host_vector<T> y(_num_points);
         thrust::host_vector<T> z(_num_points);
 
-        // thrust::uniform_real_distribution<T> dist;
-        thrust::normal_distribution<T> dist(0.5, 0.125);
+        thrust::uniform_real_distribution<T> dist;
+        // thrust::normal_distribution<T> dist(0.5, 0.125);
         auto dist_gen = [&] { return max(0.0, min(1.0, dist(_rng))); };
 
         thrust::generate(x.begin(), x.end(), dist_gen);
@@ -170,9 +147,26 @@ public:
         thrust::gather(
             thrust::device, _range, _range + _num_points, _pos.z, _tmp_pos.z);
 
-        swap_ptr(&_pos.x, &_tmp_pos.x);
-        swap_ptr(&_pos.y, &_tmp_pos.y);
-        swap_ptr(&_pos.z, &_tmp_pos.z);
+        if (_gl_buffers) {
+            // Copying back to original buffer since it's where
+            // OpenGL expects to read the particles data
+            cudaMemcpy(_pos.x,
+                       _tmp_pos.x,
+                       _num_points * sizeof(T),
+                       cudaMemcpyDeviceToDevice);
+            cudaMemcpy(_pos.y,
+                       _tmp_pos.y,
+                       _num_points * sizeof(T),
+                       cudaMemcpyDeviceToDevice);
+            cudaMemcpy(_pos.z,
+                       _tmp_pos.z,
+                       _num_points * sizeof(T),
+                       cudaMemcpyDeviceToDevice);
+        } else {
+            swap_ptr(&_pos.x, &_tmp_pos.x);
+            swap_ptr(&_pos.y, &_tmp_pos.y);
+            swap_ptr(&_pos.z, &_tmp_pos.z);
+        }
     }
 
     void compute_unique_codes(int *d_num_unique_codes)
@@ -220,7 +214,9 @@ public:
 
     ~Points()
     {
-        _pos.free();
+        if (!_gl_buffers) {
+            _pos.free();
+        }
         _tmp_pos.free();
         _scan_pos.free();
 
@@ -236,10 +232,55 @@ public:
         cudaFree(_tmp_scan);
     }
 
-private: 
+private:
+    void _init(int num_points)
+    {
+        _tmp_pos.alloc(num_points);
+        _scan_pos.alloc(num_points);
+
+        cudaMalloc(&_codes, num_points * sizeof(uint32_t));
+        cudaMalloc(&_unique_codes, num_points * sizeof(uint32_t));
+        cudaMalloc(&_codes_occurrences, num_points * sizeof(int));
+        cudaMalloc(&_codes_first_point_idx, num_points * sizeof(int));
+
+        cudaMalloc(&_range, num_points * sizeof(int));
+
+        // Determining and allocating storage for cub operations
+        _tmp_sort = nullptr;
+        cub::DeviceMergeSort::SortPairs(_tmp_sort,
+                                        _tmp_sort_size,
+                                        _codes,
+                                        _range,
+                                        num_points,
+                                        less_op);
+        cudaMalloc(&_tmp_sort, _tmp_sort_size);
+
+        int *tmp = nullptr;
+        _tmp_runlength = nullptr;
+        cub::DeviceRunLengthEncode::Encode(_tmp_runlength,
+                                           _tmp_runlength_size,
+                                           _codes,
+                                           _unique_codes,
+                                           _codes_occurrences,
+                                           tmp,
+                                           num_points);
+        cudaMalloc(&_tmp_runlength, _tmp_runlength_size);
+
+        _tmp_scan = nullptr;
+        cub::DeviceScan::ExclusiveSum(_tmp_scan,
+                                      _tmp_scan_size,
+                                      _codes_occurrences,
+                                      _codes_first_point_idx,
+                                      num_points);
+        cudaMalloc(&_tmp_scan, _tmp_scan_size);
+    }
+
     const static int _SEED = 100;
 
     thrust::default_random_engine _rng;
+
+    // Whether _pos buffers are OpenGL mapped resources
+    const bool _gl_buffers;
 
     int _num_points;
 
