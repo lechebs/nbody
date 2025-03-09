@@ -82,6 +82,18 @@ void ShaderProgram::enable()
     glUseProgram(_program_id);
 }
 
+bool ShaderProgram::loadUniformInt(const std::string &name, int value)
+{
+    GLuint location = glGetUniformLocation(_program_id, name.c_str());
+
+    if (location != -1u) {
+        enable();
+        glUniform1i(location, value);
+    }
+
+    return location > 0;
+}
+
 bool ShaderProgram::loadUniformMat4(const std::string &name,
                                     const Matrix<float, 4, 4> &value)
 {

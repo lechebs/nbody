@@ -17,7 +17,7 @@
 #include "ShaderProgram.hpp"
 #include "CUDAWrappers.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 12;
+constexpr unsigned int N_POINTS = 2 << 18;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -44,16 +44,18 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    CUDAWrappers::BarnesHut::Params p = { N_POINTS, 1 };
+    CUDAWrappers::BarnesHut::Params p = { N_POINTS, 32 };
     CUDAWrappers::BarnesHut simulation(p, _particles_ssbo);
     simulation.samplePoints();
-
     simulation.update();
+
 
     while (_running) {
         _handleEvents();
         _updateDeltaTime();
 
+        _shader_program.loadUniformInt("selected_octree_node",
+                                       (SDL_GetTicks64() % 100000) / 100.0);
 
         _updateCamera();
         _renderFrame();
@@ -184,9 +186,9 @@ void Renderer::_allocBuffers()
     };
     */
 
-    const std::array<float, N_POINTS> dummy = {};
+    const std::array<float, 2 * N_POINTS> dummy = {};
     // Creating Shader Storage Buffer Objects to store particles data.
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 5; ++i) {
         glGenBuffers(1, &_particles_ssbo[i]);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, _particles_ssbo[i]);
         // Copying particles data to GPU memory to define size
@@ -210,7 +212,7 @@ void Renderer::_setupScene()
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     // Enabling depth testing
-    glEnable(GL_DEPTH_TEST);
+    // glEnable(GL_DEPTH_TEST);
 
     //_camera.setPosition({ 0.0f, 0.0f, -1.0f });
     _camera.setSphericalPosition({ 3.0f, 0.0f, 0.0f });
@@ -226,6 +228,8 @@ void Renderer::_setupScene()
 // Handles keyboard and mouse inputs
 void Renderer::_handleEvents()
 {
+    static int curr_node = 0;
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         // ESC key press
@@ -240,6 +244,10 @@ void Renderer::_handleEvents()
             vec3 zoom_delta({ 0, 0, 0.1f * event.wheel.preciseY });
             // _camera.move(zoom_delta);
             _camera.orbit({ 0.1f * event.wheel.preciseY, 0, 0 });
+        } else if (event.type == SDL_KEYUP &&
+                   event.key.keysym.sym == SDLK_SPACE) {
+            _shader_program.loadUniformInt("selected_octree_node",
+                                           ++curr_node);
         }
     }
 

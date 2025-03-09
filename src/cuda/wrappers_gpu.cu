@@ -16,13 +16,15 @@ namespace CUDAWrappers
             btree(num_points),
             octree(num_points) {}
 
-        Impl(int num_points, void *mapped_ptrs[3]) :
+        Impl(int num_points, void *mapped_ptrs[5]) :
             points(num_points,
                    static_cast<float *>(mapped_ptrs[0]),
                    static_cast<float *>(mapped_ptrs[1]),
                    static_cast<float *>(mapped_ptrs[2])),
             btree(num_points),
-            octree(num_points) {}
+            octree(num_points,
+                   static_cast<int *>(mapped_ptrs[3]),
+                   static_cast<int *>(mapped_ptrs[4])) {}
 
         void updatePoints()
         {
@@ -34,9 +36,11 @@ namespace CUDAWrappers
 
         void updateOctree(int max_num_codes_per_leaf)
         {
+            std::cout << "num_unique_codes=" << btree.get_num_leaves() << std::endl;
             btree.generate_leaves(points.get_d_unique_codes_ptr(),
                                   max_num_codes_per_leaf);
             btree.set_max_num_leaves(btree.get_num_leaves());
+            std::cout << "num_leaves=" << btree.get_num_leaves() << std::endl;
 
             btree.build(points.get_d_unique_codes_ptr());
             btree.sort_to_bfs_order();
@@ -44,8 +48,10 @@ namespace CUDAWrappers
 
             octree.set_max_num_nodes(btree.get_max_num_nodes());
             octree.build(btree);
-            octree.compute_nodes_barycenter(
-                points, btree.get_d_leaf_first_code_idx_ptr());
+            octree.compute_nodes_points_range(
+                btree.get_d_leaf_first_code_idx_ptr(),
+                points.get_d_codes_first_point_idx_ptr());
+            octree.compute_nodes_barycenter(points);
 
             octree.print();
         }
@@ -61,12 +67,12 @@ namespace CUDAWrappers
         _impl = std::make_unique<BarnesHut::Impl>(params.num_points);
     }
 
-    BarnesHut::BarnesHut(BarnesHut::Params &params, GLuint buffers[3]) :
+    BarnesHut::BarnesHut(BarnesHut::Params &params, GLuint buffers[5]) :
         _params(params)
     {
-        void *mapped_ptrs[3];
+        void *mapped_ptrs[5];
 
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 5; ++i) {
             cudaGraphicsResource_t res;
             // Mapping OpenGL buffer for access by CUDA
             cudaGraphicsGLRegisterBuffer(&res,

@@ -28,6 +28,7 @@ template<typename T> class Octree
 public:
     // max_depth ~= btree_height / 3
     Octree(int max_num_leaves);
+    Octree(int max_num_leaves, int *d_points_begin, int *d_points_end);
 
     void set_max_num_nodes(int max_num_nodes)
     {
@@ -36,8 +37,10 @@ public:
 
     void build(const Btree &btree);
 
-    void compute_nodes_barycenter(Points<T> &points,
-                                  const int *leaf_first_code_idx);
+    void compute_nodes_points_range(const int *d_leaf_first_code_idx,
+                                    const int *d_code_first_point_idx);
+
+    void compute_nodes_barycenter(Points<T> &points);
 
     void print()
    {
@@ -58,11 +61,11 @@ public:
                    sizeof(int) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(leaves_begin.data(),
-                   _nodes.leaves_begin,
+                   _points_begin,
                    sizeof(int) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(leaves_end.data(),
-                   _nodes.leaves_end,
+                   _points_end,
                    sizeof(int) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(x_barycenter.data(),
@@ -101,6 +104,11 @@ private:
     SoAOctreeNodes _nodes;
     // Barycenter coordinates of the points within each node
     SoAVec3<T> _barycenters;
+    // Arrays to store the range of points covered by each node
+    int *_points_begin;
+    int *_points_end;
+
+    bool _gl_buffers;
 };
 
 #endif

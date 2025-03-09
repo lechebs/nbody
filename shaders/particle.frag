@@ -4,6 +4,7 @@
 
 in vec2 frag_uv;
 in vec4 particle_eye_pos;
+flat in int is_selected;
 flat in int particle_id;
 flat in float particle_radius;
 
@@ -28,17 +29,15 @@ void main()
     gl_FragDepth = frag_clip_pos.z / frag_clip_pos.w;
     */
 
-    /*
     vec4 color;
-    if (particle_id >= 3064 && particle_id <= 3189) {
-        color = vec4(0.9f, 0.1f, 0.1f, 1.0f);
+    if (is_selected > 0) {
+        color = vec4(0.9f, 0.9f, 0.9f, 0.8f);
     } else {
-        color = vec4(1.0f, 1.0f, 1.0f, 0.1f);
+        color = vec4(1.0f, 1.0f, 1.0f, 0.01f);
     }
-    */
 
-    float color = particle_id / 8192.0f;
+    // float color = particle_id / 8192.0f;
 
     // Simple sphere shading
-    frag_color = vec4(color, color, color, 1.0f);
+    frag_color = color;
 }

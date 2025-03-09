@@ -191,7 +191,7 @@ public:
                                       _tmp_scan_size,
                                       _codes_occurrences,
                                       _codes_first_point_idx,
-                                      _num_points);
+                                      _num_points + 1);
 
         // Scan coordinates to later compute the barycenter
         // of the octree nodes
@@ -240,8 +240,8 @@ private:
 
         cudaMalloc(&_codes, num_points * sizeof(uint32_t));
         cudaMalloc(&_unique_codes, num_points * sizeof(uint32_t));
-        cudaMalloc(&_codes_occurrences, num_points * sizeof(int));
-        cudaMalloc(&_codes_first_point_idx, num_points * sizeof(int));
+        cudaMalloc(&_codes_occurrences, (num_points + 1) * sizeof(int));
+        cudaMalloc(&_codes_first_point_idx, (num_points + 1) * sizeof(int));
 
         cudaMalloc(&_range, num_points * sizeof(int));
 

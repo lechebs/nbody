@@ -43,7 +43,7 @@ private:
     std::string _window_title;
 
     GLuint _quad_vao;
-    GLuint _particles_ssbo[3];
+    GLuint _particles_ssbo[5];
 
     ShaderProgram _shader_program;
 

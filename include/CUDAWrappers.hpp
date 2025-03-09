@@ -18,7 +18,7 @@ namespace CUDAWrappers
         };
 
         BarnesHut(Params &params);
-        BarnesHut(Params &params, GLuint buffers[3]);
+        BarnesHut(Params &params, GLuint buffers[5]);
         void samplePoints();
         void update();
         ~BarnesHut();
