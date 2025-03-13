@@ -7,9 +7,8 @@
 #include <iostream>
 #include <cmath>
 
-// At most 15 nodes can be visited by traversing
-// 3 levels of any subtree of the binary radix tree
-#define _BUILD_STACK_SIZE 16
+// For 3 levels DFS traversal
+#define _BUILD_STACK_SIZE 4
 
 void SoAOctreeNodes::alloc(int num_nodes)
 {
@@ -130,17 +129,17 @@ _compute_octree_nodes_barycenter(const SoAVec3<T> points,
     int begin = points_begin[idx];
     int end = points_end[idx];
 
-    T x_barycenter = scan_points.x[end] -
-                     scan_points.x[begin] +
-                     points.x[end];
+    T x_barycenter = scan_points.x(end) -
+                     scan_points.x(begin) +
+                     points.x(end);
 
-    T y_barycenter = scan_points.y[end] -
-                     scan_points.y[begin] +
-                     points.y[end];
+    T y_barycenter = scan_points.y(end) -
+                     scan_points.y(begin) +
+                     points.y(end);
 
-    T z_barycenter = scan_points.z[end] -
-                     scan_points.z[begin] +
-                     points.z[end];
+    T z_barycenter = scan_points.z(end) -
+                     scan_points.z(begin) +
+                     points.z(end);
 
     // Works when all points have unit mass
     T mass_sum = end - begin + 1;
@@ -149,9 +148,9 @@ _compute_octree_nodes_barycenter(const SoAVec3<T> points,
     y_barycenter /= mass_sum;
     z_barycenter /= mass_sum;
 
-    barycenters.x[idx] = x_barycenter;
-    barycenters.y[idx] = y_barycenter;
-    barycenters.z[idx] = z_barycenter;
+    barycenters.x(idx) = x_barycenter;
+    barycenters.y(idx) = y_barycenter;
+    barycenters.z(idx) = z_barycenter;
 
     // When dealing with different masses, multiply the x array 
     // with the mass array and then compute the prefix sum
@@ -221,7 +220,7 @@ void Octree<T>::compute_nodes_points_range(const int *d_leaf_first_code_idx,
 }
 
 template<typename T>
-void Octree<T>::compute_nodes_barycenter(Points<T> &points)
+void Octree<T>::compute_nodes_barycenter(const Points<T> &points)
 {
     _compute_octree_nodes_barycenter<<<
         _max_num_nodes / THREADS_PER_BLOCK +

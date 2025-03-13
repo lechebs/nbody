@@ -40,7 +40,7 @@ public:
     void compute_nodes_points_range(const int *d_leaf_first_code_idx,
                                     const int *d_code_first_point_idx);
 
-    void compute_nodes_barycenter(Points<T> &points);
+    void compute_nodes_barycenter(const Points<T> &points);
 
     void print()
    {
@@ -69,15 +69,15 @@ public:
                    sizeof(int) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(x_barycenter.data(),
-                   _barycenters.x,
+                   _barycenters.x(),
                    sizeof(float) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(y_barycenter.data(),
-                   _barycenters.y,
+                   _barycenters.y(),
                    sizeof(float) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(z_barycenter.data(),
-                   _barycenters.z,
+                   _barycenters.z(),
                    sizeof(float) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
 

@@ -28,7 +28,7 @@ __device__ __forceinline__ uint32_t _expand_bits(uint32_t u)
 // Computes 30-bit morton code by interleaving the bits
 // of the coordinates, supposing that they are normalized
 // in the range [0.0, 1.0]
-template<typename T> __global__ void _morton_encode(SoAVec3<T> pos,
+template<typename T> __global__ void _morton_encode(const SoAVec3<T> pos,
                                                     uint32_t *codes,
                                                     int num_points)
 {
@@ -38,9 +38,9 @@ template<typename T> __global__ void _morton_encode(SoAVec3<T> pos,
     }
 
     // Scale coordinates to [0, 2^10)
-    uint32_t x = (uint32_t) (pos.x[idx] * 1023.0f);
-    uint32_t y = (uint32_t) (pos.y[idx] * 1023.0f);
-    uint32_t z = (uint32_t) (pos.z[idx] * 1023.0f);
+    uint32_t x = (uint32_t) (pos.x(idx) * 1023.0f);
+    uint32_t y = (uint32_t) (pos.y(idx) * 1023.0f);
+    uint32_t z = (uint32_t) (pos.z(idx) * 1023.0f);
 
     x = _expand_bits(x);
     y = _expand_bits(y);
@@ -67,9 +67,9 @@ public:
         _rng(_SEED),
         _gl_buffers(true)
     {
-        _pos.x = x;
-        _pos.y = y;
-        _pos.z = z;
+        _pos.x() = x;
+        _pos.y() = y;
+        _pos.z() = z;
         _init(num_points);
     }
 
@@ -107,15 +107,15 @@ public:
         thrust::generate(y.begin(), y.end(), dist_gen);
         thrust::generate(z.begin(), z.end(), dist_gen);
 
-        cudaMemcpy(_pos.x,
+        cudaMemcpy(_pos.x(),
                    thrust::raw_pointer_cast(&x[0]),
                    _num_points * sizeof(T),
                    cudaMemcpyHostToDevice);
-        cudaMemcpy(_pos.y,
+        cudaMemcpy(_pos.y(),
                    thrust::raw_pointer_cast(&y[0]),
                    _num_points * sizeof(T),
                    cudaMemcpyHostToDevice);
-        cudaMemcpy(_pos.z,
+        cudaMemcpy(_pos.z(),
                    thrust::raw_pointer_cast(&z[0]),
                    _num_points * sizeof(T),
                    cudaMemcpyHostToDevice);
@@ -140,32 +140,41 @@ public:
                                         _num_points,
                                         less_op);
 
-        thrust::gather(
-            thrust::device, _range, _range + _num_points, _pos.x, _tmp_pos.x);
-        thrust::gather(
-            thrust::device, _range, _range + _num_points, _pos.y, _tmp_pos.y);
-        thrust::gather(
-            thrust::device, _range, _range + _num_points, _pos.z, _tmp_pos.z);
+        thrust::gather(thrust::device,
+                       _range,
+                       _range + _num_points,
+                       _pos.x(),
+                       _tmp_pos.x());
+        thrust::gather(thrust::device,
+                       _range,
+                       _range + _num_points,
+                       _pos.y(),
+                       _tmp_pos.y());
+        thrust::gather(thrust::device,
+                       _range,
+                       _range + _num_points,
+                       _pos.z(),
+                       _tmp_pos.z());
 
         if (_gl_buffers) {
             // Copying back to original buffer since it's where
             // OpenGL expects to read the particles data
-            cudaMemcpy(_pos.x,
-                       _tmp_pos.x,
+            cudaMemcpy(_pos.x(),
+                       _tmp_pos.x(),
                        _num_points * sizeof(T),
                        cudaMemcpyDeviceToDevice);
-            cudaMemcpy(_pos.y,
-                       _tmp_pos.y,
+            cudaMemcpy(_pos.y(),
+                       _tmp_pos.y(),
                        _num_points * sizeof(T),
                        cudaMemcpyDeviceToDevice);
-            cudaMemcpy(_pos.z,
-                       _tmp_pos.z,
+            cudaMemcpy(_pos.z(),
+                       _tmp_pos.z(),
                        _num_points * sizeof(T),
                        cudaMemcpyDeviceToDevice);
         } else {
-            swap_ptr(&_pos.x, &_tmp_pos.x);
-            swap_ptr(&_pos.y, &_tmp_pos.y);
-            swap_ptr(&_pos.z, &_tmp_pos.z);
+            swap_ptr(&_pos.x(), &_tmp_pos.x());
+            swap_ptr(&_pos.y(), &_tmp_pos.y());
+            swap_ptr(&_pos.z(), &_tmp_pos.z());
         }
     }
 
@@ -197,18 +206,18 @@ public:
         // of the octree nodes
         cub::DeviceScan::ExclusiveSum(_tmp_scan,
                                       _tmp_scan_size,
-                                      _pos.x,
-                                      _scan_pos.x,
+                                      _pos.x(),
+                                      _scan_pos.x(),
                                       _num_points);
         cub::DeviceScan::ExclusiveSum(_tmp_scan,
                                       _tmp_scan_size,
-                                      _pos.y,
-                                      _scan_pos.y,
+                                      _pos.y(),
+                                      _scan_pos.y(),
                                       _num_points);
         cub::DeviceScan::ExclusiveSum(_tmp_scan,
                                       _tmp_scan_size,
-                                      _pos.z,
-                                      _scan_pos.z,
+                                      _pos.z(),
+                                      _scan_pos.z(),
                                       _num_points);
     }
 
