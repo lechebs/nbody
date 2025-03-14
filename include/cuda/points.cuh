@@ -1,7 +1,8 @@
-#ifndef POINTS_GPU_CUH
-#define POINTS_GPU_CUH
+#ifndef POINTS_CUH
+#define POINTS_CUH
 
 #include "cuda/utils.cuh"
+#include "cuda/soa_vec3.cuh"
 
 #include <thrust/execution_policy.h>
 #include <thrust/device_ptr.h>

@@ -1,5 +1,6 @@
 #include "cuda/octree.cuh"
 
+#include "cuda/soa_vec3.cuh"
 #include "cuda/soa_btree_nodes.cuh"
 #include "cuda/soa_octree_nodes.cuh"
 #include "cuda/btree.cuh"

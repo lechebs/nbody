@@ -1,5 +1,5 @@
-#ifndef BTREE_GPU_CUH
-#define BTREE_GPU_CUH
+#ifndef BTREE_CUH
+#define BTREE_CUH
 
 #include "cuda/utils.cuh"
 #include "cuda/soa_btree_nodes.cuh"
