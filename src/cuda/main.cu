@@ -1,9 +1,9 @@
 #include <iostream>
 
-#include "cuda/utils_gpu.cuh"
-#include "cuda/points_gpu.cuh"
-#include "cuda/btree_gpu.cuh"
-#include "cuda/octree_gpu.cuh"
+#include "cuda/utils.cuh"
+#include "cuda/points.cuh"
+#include "cuda/btree.cuh"
+#include "cuda/octree.cuh"
 
 #define TIMER_START(start) cudaEventRecord(start);
 #define TIMER_STOP(msg, start, stop) {                   \

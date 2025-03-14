@@ -1,7 +1,7 @@
 #ifndef POINTS_GPU_CUH
 #define POINTS_GPU_CUH
 
-#include "utils_gpu.cuh"
+#include "cuda/utils.cuh"
 
 #include <thrust/execution_policy.h>
 #include <thrust/device_ptr.h>
@@ -172,6 +172,7 @@ public:
                        _num_points * sizeof(T),
                        cudaMemcpyDeviceToDevice);
         } else {
+            // WARNING: is this safe?
             swap_ptr(&_pos.x(), &_tmp_pos.x());
             swap_ptr(&_pos.y(), &_tmp_pos.y());
             swap_ptr(&_pos.z(), &_tmp_pos.z());

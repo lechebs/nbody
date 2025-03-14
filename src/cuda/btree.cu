@@ -1,6 +1,7 @@
-#include "cuda/btree_gpu.cuh"
+#include "cuda/btree.cuh"
 
-#include "cuda/utils_gpu.cuh"
+#include "cuda/utils.cuh"
+#include "cuda/soa_btree_nodes.cuh"
 
 #include <thrust/execution_policy.h>
 #include <thrust/scan.h>
@@ -10,28 +11,6 @@
 
 #include <cub/device/device_merge_sort.cuh>
 #include <cub/device/device_partition.cuh>
-
-void SoABtreeNodes::alloc(int num_nodes)
-{
-    cudaMalloc(&parent, num_nodes * sizeof(int));
-    cudaMalloc(&depth, num_nodes * sizeof(int));
-    cudaMalloc(&left, num_nodes * sizeof(int));
-    cudaMalloc(&right, num_nodes * sizeof(int));
-    cudaMalloc(&edge_delta, num_nodes * sizeof(int));
-    cudaMalloc(&leaves_begin, num_nodes * sizeof(int));
-    cudaMalloc(&leaves_end, num_nodes * sizeof(int));
-}
-
-void SoABtreeNodes::free()
-{
-    cudaFree(parent);
-    cudaFree(depth);
-    cudaFree(left);
-    cudaFree(right);
-    cudaFree(edge_delta);
-    cudaFree(leaves_begin);
-    cudaFree(leaves_end);
-}
 
 // Computes the longes common prefix between
 // the bits of two unsigned integers
@@ -140,15 +119,15 @@ __device__ void _set_node_child(const uint32_t *codes,
     }
     */
 
-    nodes.parent[2 * child_idx + !is_leaf] = 2 * parent_idx + 1;
-    nodes.edge_delta[2 * child_idx + !is_leaf] = delta;
-    nodes.depth[2 * child_idx + !is_leaf] = delta;
+    nodes.parent(2 * child_idx + !is_leaf) = 2 * parent_idx + 1;
+    nodes.edge_delta(2 * child_idx + !is_leaf) = delta;
+    nodes.depth(2 * child_idx + !is_leaf) = delta;
 
     if (is_leaf) {
-        nodes.left[2 * child_idx] = 0;
-        nodes.right[2 * child_idx] = 0;
-        nodes.leaves_begin[2 * child_idx] = child_idx;
-        nodes.leaves_end[2 * child_idx] = child_idx;
+        nodes.left(2 * child_idx) = 0;
+        nodes.right(2 * child_idx) = 0;
+        nodes.leaves_begin(2 * child_idx) = child_idx;
+        nodes.leaves_end(2 * child_idx) = child_idx;
     }
 
 }
@@ -252,8 +231,8 @@ __global__ void _build_radix_tree(const uint32_t *codes,
         // from the previous iteration
 
         // WARNING: make sure this is correct
-        nodes.depth[2 * idx + 1] = 2 * num_leaves; // +1 just to be sure
-        nodes.depth[2 * idx + 2] = 2 * num_leaves; // +1 just to be sure
+        nodes.depth(2 * idx + 1) = 2 * num_leaves; // +1 just to be sure
+        nodes.depth(2 * idx + 2) = 2 * num_leaves; // +1 just to be sure
     }
 
     if (idx >= num_internal) {
@@ -261,10 +240,10 @@ __global__ void _build_radix_tree(const uint32_t *codes,
     }
 
     if (idx == 0) {
-        nodes.parent[1] = 0;
-        nodes.depth[1] = 0;
+        nodes.parent(1) = 0;
+        nodes.depth(1) = 0;
         // The root node is a valid octree node
-        nodes.edge_delta[1] = 1;
+        nodes.edge_delta(1) = 1;
 
 #pragma unroll
         for (int i = 0; i < 3; i++) {
@@ -314,12 +293,12 @@ __global__ void _build_radix_tree(const uint32_t *codes,
     int min_leaf = min(idx, last);
     int max_leaf = max(idx, last);
     // Range of leaves covered by the internal node
-    nodes.leaves_begin[2 * idx + 1] = min_leaf;
-    nodes.leaves_end[2 * idx + 1] = max_leaf;
+    nodes.leaves_begin(2 * idx + 1) = min_leaf;
+    nodes.leaves_end(2 * idx + 1) = max_leaf;
 
     _set_node_child(codes,
                     nodes,
-                    nodes.left,
+                    nodes.left(),
                     idx,
                     split,
                     min_leaf,
@@ -327,7 +306,7 @@ __global__ void _build_radix_tree(const uint32_t *codes,
 
     _set_node_child(codes,
                     nodes,
-                    nodes.right,
+                    nodes.right(),
                     idx,
                     split + 1,
                     max_leaf,
@@ -420,7 +399,7 @@ Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
     cub::DeviceMergeSort::StableSortPairs(
         _tmp_sort,
         _tmp_sort_size,
-        _nodes.depth,
+        _nodes._depth,
         _tmp_ranges,
         get_max_num_nodes(),
         _sort_op);
@@ -513,16 +492,16 @@ void Btree::build(const uint32_t *d_sorted_codes)
         _compute_nodes_depth<<<
             get_max_num_nodes() / MAX_THREADS_PER_BLOCK +
             (get_max_num_nodes() % MAX_THREADS_PER_BLOCK > 0),
-            MAX_THREADS_PER_BLOCK>>>(_nodes.parent,
-                                     _nodes.depth,
-                                     _tmp_nodes.parent,
-                                     _tmp_nodes.depth,
+            MAX_THREADS_PER_BLOCK>>>(_nodes._parent,
+                                     _nodes._depth,
+                                     _tmp_nodes._parent,
+                                     _tmp_nodes._depth,
                                      _num_leaves,
                                      get_max_num_nodes());
 
         // TODO: consider using std::swap
-        swap_ptr(&_nodes.parent, &_tmp_nodes.parent);
-        swap_ptr(&_nodes.depth, &_tmp_nodes.depth);
+        swap_ptr(&_nodes._parent, &_tmp_nodes._parent);
+        swap_ptr(&_nodes._depth, &_tmp_nodes._depth);
     }
 }
 
@@ -543,24 +522,24 @@ void Btree::sort_to_bfs_order()
     cub::DeviceMergeSort::StableSortPairs(
         _tmp_sort,
         _tmp_sort_size,
-        _nodes.depth,
+        _nodes._depth,
         tmp_perm_in,
         get_max_num_nodes(),
         _sort_op);
 
     int **in_ptrs[5];
-    in_ptrs[0] = &_nodes.left;
-    in_ptrs[1] = &_nodes.right;
-    in_ptrs[2] = &_nodes.edge_delta;
-    in_ptrs[3] = &_nodes.leaves_begin;
-    in_ptrs[4] = &_nodes.leaves_end;
+    in_ptrs[0] = &_nodes._left;
+    in_ptrs[1] = &_nodes._right;
+    in_ptrs[2] = &_nodes._edge_delta;
+    in_ptrs[3] = &_nodes._leaves_begin;
+    in_ptrs[4] = &_nodes._leaves_end;
 
     int **tmp_ptrs[5];
-    tmp_ptrs[0] = &_tmp_nodes.left;
-    tmp_ptrs[1] = &_tmp_nodes.right;
-    tmp_ptrs[2] = &_tmp_nodes.edge_delta;
-    tmp_ptrs[3] = &_tmp_nodes.leaves_begin;
-    tmp_ptrs[4] = &_tmp_nodes.leaves_end;
+    tmp_ptrs[0] = &_tmp_nodes._left;
+    tmp_ptrs[1] = &_tmp_nodes._right;
+    tmp_ptrs[2] = &_tmp_nodes._edge_delta;
+    tmp_ptrs[3] = &_tmp_nodes._leaves_begin;
+    tmp_ptrs[4] = &_tmp_nodes._leaves_end;
 
 #pragma unroll
     for (int i = 0; i < 5; ++i) {
@@ -586,8 +565,8 @@ void Btree::sort_to_bfs_order()
 
     _correct_child_pointers<<<get_max_num_nodes() / THREADS_PER_BLOCK +
                               (get_max_num_nodes() % THREADS_PER_BLOCK > 0),
-                              THREADS_PER_BLOCK>>>(_nodes.left,
-                                                   _nodes.right,
+                              THREADS_PER_BLOCK>>>(_nodes._left,
+                                                   _nodes._right,
                                                    tmp_perm_out,
                                                    _num_leaves);
 }
@@ -600,8 +579,8 @@ void Btree::compute_octree_map()
 
     // TODO: use cub::DeviceScan
     thrust::exclusive_scan(thrust::device,
-                           _nodes.edge_delta,
-                           _nodes.edge_delta + get_max_num_nodes(),
+                           _nodes._edge_delta,
+                           _nodes._edge_delta + get_max_num_nodes(),
                            _octree_map);
 }
 

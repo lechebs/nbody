@@ -7,7 +7,7 @@ constexpr int THREADS_PER_BLOCK = 32;
 // TODO: compute it such that a SM is fully utilized
 constexpr int MAX_THREADS_PER_BLOCK = 512;
 
-template<typename T> struct SoAVec3
+template<typename T> class SoAVec3
 {
 public:
     __device__ __forceinline__ T x(int idx) const { return _x[idx]; }

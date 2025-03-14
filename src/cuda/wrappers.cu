@@ -3,9 +3,9 @@
 #include <GL/glew.h>
 #include <cuda_gl_interop.h>
 
-#include "cuda/points_gpu.cuh"
-#include "cuda/btree_gpu.cuh"
-#include "cuda/octree_gpu.cuh"
+#include "cuda/points.cuh"
+#include "cuda/btree.cuh"
+#include "cuda/octree.cuh"
 
 namespace CUDAWrappers
 {

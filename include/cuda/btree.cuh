@@ -1,27 +1,12 @@
 #ifndef BTREE_GPU_CUH
 #define BTREE_GPU_CUH
 
-#include "utils_gpu.cuh"
+#include "cuda/utils.cuh"
+#include "cuda/soa_btree_nodes.cuh"
 
 #include <iostream>
 #include <vector>
 
-struct SoABtreeNodes
-{
-    void alloc(int num_nodes);
-    void free();
-
-    int *parent;
-    int *depth;
-
-    int *left;
-    int *right;
-    int *edge_delta;
-    int *leaves_begin;
-    int *leaves_end;
-};
-
-// SoA to store the binary radix tree
 class Btree
 {
 // TODO: consider converting to unsigned int
@@ -102,27 +87,27 @@ public:
         std::vector<int> perm(get_max_num_nodes());
 
         cudaMemcpy(left.data(),
-                   _nodes.left,
+                   _nodes._left,
                    left.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(right.data(),
-                   _nodes.right,
+                   _nodes._right,
                    right.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(begin.data(),
-                   _nodes.leaves_begin,
+                   _nodes._leaves_begin,
                    begin.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(end.data(),
-                   _nodes.leaves_end,
+                   _nodes._leaves_end,
                    end.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(depth.data(),
-                   _nodes.depth,
+                   _nodes._depth,
                    depth.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(edge.data(),
-                   _nodes.edge_delta,
+                   _nodes._edge_delta,
                    edge.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(map.data(),
@@ -130,7 +115,7 @@ public:
                    map.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(parent.data(),
-                   _nodes.parent,
+                   _nodes._parent,
                    parent.size() * sizeof(int),
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(perm.data(),

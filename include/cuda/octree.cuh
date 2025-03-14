@@ -1,26 +1,13 @@
 #ifndef OCTREE_GPU_CUH
 #define OCTREE_GPU_CUH
 
-#include "btree_gpu.cuh"
-#include "points_gpu.cuh"
-#include "utils_gpu.cuh"
+#include "cuda/soa_octree_nodes.cuh"
+#include "cuda/btree.cuh"
+#include "cuda/points.cuh"
+#include "cuda/utils.cuh"
 
 #include <iostream>
 #include <vector>
-
-struct SoAOctreeNodes
-{
-    void alloc(int num_nodes);
-    void free();
-
-    // Array to store the index of the first child of each node
-    int *first_child;
-    // Array to store the number of children of each node
-    int *num_children;
-    // Arrays to store the range of leaves covered by each node
-    int *leaves_begin;
-    int *leaves_end;
-};
 
 // SoA to store the octree
 template<typename T> class Octree
@@ -53,11 +40,11 @@ public:
         std::vector<float> z_barycenter(_max_num_nodes);
 
         cudaMemcpy(first_child.data(),
-                   _nodes.first_child,
+                   _nodes._first_child,
                    sizeof(int) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(num_children.data(),
-                   _nodes.num_children,
+                   _nodes._num_children,
                    sizeof(int) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
         cudaMemcpy(leaves_begin.data(),
