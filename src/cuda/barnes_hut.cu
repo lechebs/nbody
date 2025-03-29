@@ -6,6 +6,21 @@
 
 #define WARP_SIZE 32
 
+__device__ int _scan_warp(int value)
+{
+    int delta = 1;
+
+    #pragma unroll
+    for (int i = 0; i < 5; ++i) {
+        if (threadIdx.x >= delta) {
+            value += __shfl_up_sync(0xffffffff, value, delta);
+        }
+        delta = delta << 1;
+    }
+
+    return value;
+}
+
 template<typename T> __device__ __forceinline__
 bool _opening_crit(T bx, T by, T bz, T dist, T theta)
 {
@@ -29,6 +44,164 @@ void _compute_pairwise_force(T p1x, T p1y, T p1z,
     dst_x = dist_x / dist;
     dst_y = dist_y / dist;
     dst_z = dist_z / dist;
+
+__device__ __forceinline__ int _append_to_queue(const int *open_buff,
+                                                const int *open_size_buff,
+                                                int *queue,
+                                                int queue_size,
+                                                int num_nodes)
+{
+    for (int j = 0; j + threadIdx.x < num_nodes; j += WARP_SIZE) {
+
+        // Iterative binary search
+        int start = min(j + 32, num_nodes);
+        int length = num_nodes - start;
+
+        int left = 0;
+        int step = length >> 1;
+        while (step > 0) {
+            if (j + threadIdx.x >= open_size_buff[left + step]) {
+                left += step;
+            }
+            step >>= 1;
+        }
+
+        int queue_dst = next_queue_size + j + threadIdx.x;
+
+        __syncwarp(__activemask());
+
+        next_queue[queue_dst] = open_buff[left];
+                                threadIdx.x -
+                                open_size_buff[left];
+    }
+}
+
+template<typename T> __device__ __forceinline__
+int _evaluate_cluster(const SoAVec3<T> bodies_pos,
+                      SoAVec3<T> bodies_acc,
+                      const SoAVec3<T> nodes_barycenter,
+                      const int *bodies_begin,
+                      const int *bodies_end,
+                      int *cluster_buff,
+                      T *x_buff,
+                      T *y_buff,
+                      T *z_buff,
+                      int cluster_buff_size,
+                      int first_point_idx,
+                      int num_points)
+{
+    int start_buff_idx = cluster_buff_size - 32;
+    int cluster = cluster_buff[start_buff_idx + threadIdx.x];
+    // Reuse buffer to hold cluster mass
+    cluster_buff[threadIdx.x] = bodies_end[cluster] -
+                                bodies_begin[cluster];
+    x_buff[threadIdx.x] = nodes_barycenter.x(cluster);
+    y_buff[threadIdx.x] = nodes_barycenter.y(cluster);
+    z_buff[threadIdx.x] = nodes_barycenter.z(cluster);
+
+    __syncwarp();
+
+    // Loop over points in warp in chunks
+    for (int j = 0; j + threadIdx.x < num_points; j += WARP_SIZE) {
+        int idx = first_point_idx + j + threadIdx.x;
+
+        T px = bodies_pos.x(idx);
+        T py = bodies_pos.y(idx);
+        T pz = bodies_pos.z(idx);
+
+        T fx = 0.0;
+        T fy = 0.0;
+        T fz = 0.0;
+
+        #pragma unroll
+        for (int k = 0; k < WARP_SIZE; ++k) {
+            _compute_pairwise_force(x_buff[k],
+                                    y_buff[k],
+                                    z_buff[k],
+                                    px,
+                                    py,
+                                    pz,
+                                    cluster_buff[k]
+                                    fx,
+                                    fy,
+                                    fz);
+        }
+
+        bodies_acc.x(idx) += fx;
+        bodies_acc.y(idx) += fy;
+        bodies_acc.z(idx) += fz;
+    }
+
+    return start_buff_idx;
+}
+
+template<typename T> __device__ __forceinline__
+void _evaluate_leaf(const SoAVec3<T> bodies_pos,
+                    SoAVec3<T> bodies_acc,
+                    const int *bodies_begin,
+                    const int *bodies_end,
+                    int leaf,
+                    T *x_buff,
+                    T *y_buff,
+                    T *z_buff,
+                    int group_first_body,
+                    int group_num_bodies)
+{
+    int leaf_first_body = bodies_begin[node];
+    int leaf_num_bodies = bodies_end[node] - leaf_first_body;
+
+    // Loop over points in warp in chunks
+    for (int j = 0; j < group_num_bodies; j += WARP_SIZE) {
+        int idx = group_first_body + j + threadIdx.x;
+
+        T px, py, pz;
+
+        T fx = 0.0;
+        T fy = 0.0;
+        T fz = 0.0;
+
+        if (j + threadIdx.x < group_num_bodies) {
+            px = bodies_pos.x(idx);
+            py = bodies_pos.y(idx);
+            pz = bodies_pos.z(idx);
+        }
+
+        // Load bodies into shared memory in chunks
+        for (int k = 0; k < leaf_num_bodies; k += WARP_SIZE) {
+            __syncwarp();
+
+            if (j + threadIdx.x < leaf_num_bodies) {
+                int idx = leaf_first_body + j + threadIdx.x;
+                x_buff[threadIdx.x] = bodies_pos.x(idx)
+                y_buff[threadIdx.x] = bodies_pos.y(idx);
+                z_buff[threadIdx.x] = bodies_pos.z(idx);
+            }
+
+            __syncwarp();
+
+            if (j + threadIdx.x >= group_num_bodies) {
+                continue;
+            }
+
+            #pragma unroll
+            for (int b = 0; b < WARP_SIZE; ++b) {
+                if (b + k >= leaf_num_bodies) {
+                    break;
+                }
+
+                _compute_pairwise_force(x_buff[b],
+                                        y_buff[b],
+                                        z_buff[b],
+                                        px,
+                                        py,
+                                        pz,
+                                        1.0,
+                                        fx,
+                                        fy,
+                                        fz);
+            }
+        }
+    }
 }
 
 template<typename T>
@@ -40,143 +213,218 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                      const int *queue,
                                      int *next_queue,
                                      T *bodies_acc,
+
                                      int queue_size,
                                      T theta,
                                      int num_bodies)
 {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= num_bodies) {
+    if (blockIdx.x >= *num_leaves) {
         return;
-    }
+    } 
 
     __shared__ T buff_x[WARP_SIZE];
     __shared__ T buff_y[WARP_SIZE];
     __shared__ T buff_z[WARP_SIZE];
 
-    __shared__ int interaction_list[32];
+    // __shared__ int leaf_buff[64];
+    __shared__ int cluster_buff[64];
+    __shared__ int open_buff[36];
+    __shared__ int open_size_buff[36];
 
-    // Should be kept in registers if indexed predictably
-    int queue_alloc[WARP_SIZE];
+    // int leaf_buff_size = 0;
+    int cluster_buff_size = 0;
+    int open_buff_size = 0;
+    int open_size_last = 0;
 
-    T px = pos.x(idx);
-    T py = pos.y(idx);
-    T pz = pos.z(idx);
+    int first_code_idx = leaf_first_code_idx[blockIdx.x];
+    int end_code_idx = leaf_first_code_idx[blockIdx.x + 1];
+    int num_codes = end_code_idx - first_code_idx;
 
-    buff_x[threadIdx.x] = px;
-    buff_y[threadIdx.x] = py;
-    buff_z[threadIdx.x] = pz;
+    int first_point_idx = codes_first_point_idx[first_code_idx];
+    int end_point_idx = codes_first_point_idx[end_code_idx];
+    int num_points = end_point_idx - first_point_idx;
+
+    // Index of the first point covered by the current code
+    int p_idx =
+        codes_first_point_idx[first_code_idx + threadIdx.x % num_codes];
+
+    T cx = bodies_pos.x(p_idx);
+    T cy = bodies_pos.y(p_idx);
+    T cz = bodies_pos.z(p_idx);
 
     while (queue_size > 0) {
-       // Process each node in the queue in round-robin fashion
+        int next_queue_size = 0;
+        // Process each node in the queue in round-robin fashion
         for (int i = 0; i < queue_size; i += WARP_SIZE) {
-            if (i >= queue_size) {
-                continue;
-            }
 
-            unsigned int leaves_mask = 0;
-            unsigned int open_mask = 0;
+            buff_x[threadIdx.x] = cx;
+            buff_y[threadIdx.x] = cy;
+            buff_z[threadIdx.x] = cz;
 
-            // Get barycenter of current node
-            int node = queue[threadIdx.x + i];
-            T bx = nodes_barycenter.x(node);
-            T by = nodes_barycenter.y(node);
-            T bz = nodes_barycenter.z(node);
+            // Ensure memory ordering
+            __syncwarp();
 
-            // Compute min distance of group to barycenter
-            T min_dist_sq = 3; // coordinates are within the unit cube
-            #pragma unroll
-            for (int j = 0; j < WARP_SIZE; ++j) {
-                // Shifting to avoid bank conflicts
-                int k = (j + threadIdx.x) % WARP_SIZE;
-                T dx = buff_x[k] - bx;
-                T dy = buff_y[k] - by;
-                T dz = buff_z[k] - bz;
+            int node;
+            int first_child;
+            int num_children = 0;
 
-                T dist_sq = px * px + py * py + pz * pz;
-                if (dist_sq <= min_dist_sq) {
-                    min_dist_sq = dist_sq;
-                }
-            }
+            int cluster_mask_bit = 0;
+            int open_mask_bit = 0;
 
-            bool open_node = _opening_crit(bx, by, bz, min_dist_sq, theta);
-            int num_children = nodes.num_children(node);
-            if (num_children == 0 || !open_node) {
-                // Keep track of node to be evaluated
-                interaction_list[threadIdx.x] = node;
+            if (i + threadIdx.x < queue_size) {
+                node = queue[threadIdx.x + i];
+                // Get barycenter of current node
+                T bx = nodes_barycenter.x(node);
+                T by = nodes_barycenter.y(node);
+                T bz = nodes_barycenter.z(node);
 
-                buff_x[threadIdx.x] = bx;
-                buff_y[threadIdx.y] = by;
-                buff_z[threadIdx.y] = bz;
-            }
+                // Compute min distance of group to barycenter
+                // WARNING: coordinates are within the unit cube
+                T min_dist_sq = 3;
+                #pragma unroll
+                for (int j = 0; j < WARP_SIZE; ++j) {
+                    // Shifting to avoid bank conflicts
+                    int k = (j + threadIdx.x) % WARP_SIZE;
+                    T dx = buff_x[k] - bx;
+                    T dy = buff_y[k] - by;
+                    T dz = buff_z[k] - bz;
 
-            leaves_mask = _ballot(num_children == 0);
-            open_mask = _ballot(open_node && num_children > 0);
-
-            // TODO: scan masks and compact into list
-            // then wait for them to be > 32 before evaluating them
-            // this should help with caching
-
-            if (!(open_mask & 0xffffffff)) {
-            unsigned int bit_mask = 1;
-            #pragma unroll
-            for (int j = 0; j < WARP_SIZE; ++j) {
-
-                if (open_mask & bit_mask) {
-                    continue;
-                }
-
-                int node = interaction_list[j];
-                int first_body = bodies_begin[node]
-                int last_body = bodies_end[node];
-
-                T force_x = 0;
-                T force_y = 0;
-                T force_z = 0;
-
-                // Divergence-free selection
-                if (leaves_mask & bit_mask) {
-                    // TODO: perhaps evaluate only with respect to one
-                    // of the points covered by a code? otherwise we
-                    // risk a O(n^2) here if the points collapse
-                    for (int body = first_body; body <= last_body; ++body) {
-                        _compute_pairwise_force(bodies_pos.x(body),
-                                                bodies_pos.y(body),
-                                                bodies_pos.z(body),
-                                                px,
-                                                py,
-                                                pz,
-                                                1.0,
-                                                force_x,
-                                                force_y,
-                                                force_z);
+                    T dist_sq = px * px + py * py + pz * pz;
+                    if (dist_sq <= min_dist_sq) {
+                        min_dist_sq = dist_sq;
                     }
-                } else {
-                    T mass = (T) (bodies_end - bodies_begin + 1);
-                    _compute_pairwise_force(buff_x[threadIdx.x],
-                                            buff_y[threadIdx.y],
-                                            buff_z[threadIdx.z],
-                                            px,
-                                            py,
-                                            pz,
-                                            mass,
-                                            force_x,
-                                            force_y,
-                                            force_z);
-               }
+                }
 
-                bodies_acc.x(threadIdx.x) += force_x;
-                bodies_acc.x(threadIdx.x) += force_y;
-                bodies_acc.x(threadIdx.x) += force_z;
+                // Synchronize active threads to allow coalescing
+                __syncwarp(__activemask());
 
-                bit_mask = bit_mask << 1;
-            }
+                num_children = nodes.num_children(node);
+                first_child = nodes.first_child(node);
+                leaf_mask_bit = num_children == 0;
+
+                open_mask_bit = !leaf_mask_bit &&
+                                _opening_crit(bx, by, bz, min_dist_sq, theta);
+
+                cluster_mask_bit = !leaf_mask_bit && !open_mask_bit;
             }
 
-            queue_alloc[threadIdx.x] = num_children * open_node;
+            int cluster_mask_scan = cluster_mask_bit;
+            int open_mask_scan = open_mask_bit;
+            int open_size_scan = open_mask_bit * num_children;
+            // In-warp exclusive scan of the bitmasks
+            #pragma unroll
+            for (int j = 0, delta = 1; j < 5; ++j, delta <<= 1) {
 
-            // Scan queue_alloc, write next_queue
-            // swap queue and next_queue pointers
+                int cluster_val = __shfl_up_sync(0xffffffff,
+                                                 cluster_mask_scan,
+                                                 delta);
 
+                int open_val = __shfl_up_sync(0xffffffff,
+                                              open_mask_scan,
+                                              delta);
+
+                int size_val = __shfl_up_sync(0xffffffff,
+                                              open_size_scan,
+                                              delta);
+
+
+                if (threadIdx.x >= delta) {
+                    cluster_mask_scan += cluster_val;
+                    open_mask_scan += open_val;
+                    open_size_scan += size_val;
+                 }
+            }
+
+            // Compact interactions to be evaluated and nodes
+            // to be opened into buffers
+            int cluster_buff_off = cluster_buff_size + cluster_mask_scan;
+            int open_buff_off = open_buff_size + open_mask_scan;
+
+            if (cluster_mask_bit) {
+                cluster_buff[cluster_buff_off] = node;
+            } else if (open_mask_bit) {
+                open_buff[open_buff_off] = first_child;
+                open_size_buff[open_buff_off] = open_size_scan +
+                                                open_size_last;
+            }
+
+            unsigned int open_mask = __ballot_sync(0xffffffff, open_mask_bit);
+            int last_open_num_children = 0;
+            int last_open_bit = 32 - __ffs(__brev(open_mask));
+            if (last_open_bit >= 0) {
+                last_num_children = __shfl_sync(0xffffffff,
+                                                num_children,
+                                                last_open_bit);
+            }
+            open_size_last += last_open_num_children;
+
+            // Let warp 32 compute the length of the buffers
+            cluster_buff_size =
+                __shfl_sync(0xffffffff,
+                            cluster_buff_off + cluster_mask_bit,
+                            31);
+            open_buff_size =
+                __shfl_sync(0xffffffff,
+                            open_buff_off + open_mask_bit,
+                            31);
+
+            // Append children nodes to next queue
+            if (open_buff_size >= 4) {
+                int num_nodes = open_size_scan[open_buff_size - 1] + 
+                                last_open_num_children;
+
+                _append_to_queue(open_buff,
+                                 open_buff_size,
+                                 next_queue,
+                                 next_queue_size,
+                                 num_nodes);
+
+                open_buff_size = 0;
+                open_size_last = 0;
+                next_queue_size += num_nodes;
+            }
+
+            unsigned int leaf_mask = __ballot_sync(0xffffffff, leaf_mask_bit);
+            unsigned int src_lane = 0;
+            // Loop over the set bits in leaf_mask
+            while ((src_lane = __fns(leaf_mask, src_lane, 0)) < 32) {
+                int leaf = __shfl_sync(0xffffffff, node, src_lane);
+                _evaluate_leaf(bodies_pos,
+                               bodies_acc,
+                               bodies_begin,
+                               bodies_end,
+                               leaf,
+                               buff_x,
+                               buff_y,
+                               buff_z,
+                               first_point_idx,
+                               num_points);
+            }
+
+            // Evaluate cluster interaction list
+            if (cluster_buff_size >= 32) {
+                cluster_buff_size = _evaluate_cluster(bodies_pos,
+                                                      bodies_acc,
+                                                      nodes_barycenter,
+                                                      bodies_begin,
+                                                      bodies_end,
+                                                      cluster_buff,
+                                                      buff_x,
+                                                      buff_y,
+                                                      buff_z,
+                                                      cluster_buff_size,
+                                                      first_point_idx,
+                                                      num_points);
+            }
+
+        }
+
+        if (next_queue_size > 0) {
+            int *tmp = queue;
+            queue = next_queue;
+            next_queue = tmp;
+
+            queue_size = next_queue_size;
         }
     }
 
@@ -197,3 +445,92 @@ BarnesHut<T>::update_bodies(T dt)
 
 template<typename T>
 BarnesHut<T>::~BarnesHut() {}
+
+
+            // Evaluate leaf interaction list
+            /*
+            if (leaf_buff_size >= 32) {
+
+                // Load leaves data into shared memory
+                int start_buff_idx = leaf_buff_size - 32;
+                int leaf = leaf_buff[start_buff_idx + threadIdx.x];
+
+                int leaf_first_body_idx = bodies_begin[leaf];
+                int leaf_end_body_idx = bodies_end[leaf];
+
+                leaf_buff[start_buff_idx] = leaf_first_body_idx;
+                buff_nbodies[threadIdx.x] = leaf_end_body_idx -
+                                              leaf_first_body_idx;
+
+                leaf_buff_size = start_buff_idx;
+
+                __syncwarp();
+
+                // Loop over cached leaves
+                #pragma unroll
+                for (int l = 0; l < 32; ++l) {
+
+                    int first_body_idx = leaf_buff[start_buff_idx + l];
+                    int num_bodies = buff_nbodies[l];
+
+                    // Loop over chunks of points inside the current warp
+                    for (int p = first_point_idx;
+                         p < end_point_idx;
+                         p += WARP_SIZE) {
+
+                        T px, py pz;
+
+                        T fx = 0.0;
+                        T fy = 0.0;
+                        T fz = 0.0;
+
+                        if (p + threadIdx.x < end_point_idx) {
+                            // Hopefully this will be often in cache
+                            px = pos.x(j + threadIdx.x);
+                            py = pos.y(j + threadIdx.x);
+                            pz = pos.z(j + threadIdx.x);
+                        }
+
+                        for (int k = 0; k < num_bodies; k += WARP_SIZE) {
+                            __syncwarp();
+
+                            if (k + threadIdx.x < num_bodies) {
+                                int idx = first_body_idx + k + threadIdx.x;
+                                buff_x[threadIdx.x] = pos.x(idx)
+                                buff_y[threadIdx.x] = pos.y(idx);
+                                buff_z[threadIdx.x] = pos.z(idx);
+                            }
+
+                            __syncwarp();
+
+                            if (p + threadIdx.x >= end_point_idx) {
+                                continue;
+                            }
+
+                            #pragma unroll
+                            for (int lp = 0; lp < 32; ++lp) {
+                                if (k + lp >= num_bodies) {
+                                    break;
+                                }
+
+                                _compute_pairwise_force(buff_x[lp],
+                                                        buff_y[lp],
+                                                        buff_z[lp],
+                                                        px,
+                                                        py,
+                                                        pz,
+                                                        1.0,
+                                                        fx,
+                                                        fy,
+                                                        fz);
+                            }
+                        }
+
+                        bodies_acc.x(j + threadIdx.x) += fx;
+                        bodies_acc.y(j + threadIdx.x) += fy;
+                        bodies_acc.z(j + threadIdx.x) += fz;
+                    }
+                }
+            }
+            */
+
