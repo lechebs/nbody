@@ -17,6 +17,26 @@ public:
     Octree(int max_num_leaves);
     Octree(int max_num_leaves, int *d_points_begin, int *d_points_end);
 
+    const SoAOctreeNodes get_d_nodes() const
+    {
+        return _nodes;
+    }
+
+    const SoAVec3<T> get_d_barycenters() const
+    {
+        return _barycenters;
+    }
+
+    const int *get_d_points_begin_ptr() const
+    {
+        return _points_begin;
+    }
+
+    const int *get_d_points_end_ptr() const
+    {
+        return _points_end;
+    }
+
     void set_max_num_nodes(int max_num_nodes)
     {
         _max_num_nodes = max_num_nodes;
@@ -68,7 +88,7 @@ public:
                    sizeof(float) * _max_num_nodes,
                    cudaMemcpyDeviceToHost);
 
-        for (int i = 0; i < min(100, _max_num_nodes); ++i)
+        for (int i = 0; i < min(150, _max_num_nodes); ++i)
         {
             printf("%2d: [", i);
             for (int j = 0; j < num_children[i]; ++j) {

@@ -50,6 +50,11 @@ __global__ void _build_octree(const SoABtreeNodes btree_nodes,
     // Resetting number of children
     octree_nodes.num_children(parent) = 0;
 
+    int node_level = btree_nodes.lcp(idx) / 3;
+    // Computing the side length of the cube
+    // spanned by the octree node
+    octree_nodes.size(parent) = 1.0 / (1 << node_level);
+
     int node_leaves_begin = btree_nodes.leaves_begin(idx);
     int node_leaves_end = btree_nodes.leaves_end(idx);
 

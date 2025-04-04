@@ -8,7 +8,7 @@
 namespace CUDAWrappers
 {
     // Opaque class
-    class BarnesHut
+    class Simulation
     {
     public:
         struct Params
@@ -17,11 +17,11 @@ namespace CUDAWrappers
             int max_num_codes_per_leaf;
         };
 
-        BarnesHut(Params &params);
-        BarnesHut(Params &params, GLuint buffers[5]);
+        Simulation(Params &params);
+        Simulation(Params &params, GLuint buffers[5]);
         void samplePoints();
         void update();
-        ~BarnesHut();
+        ~Simulation();
 
     private:
         struct Impl;

@@ -4,6 +4,7 @@
 #include "cuda/points.cuh"
 #include "cuda/btree.cuh"
 #include "cuda/octree.cuh"
+#include "cuda/barnes_hut.cuh"
 
 #define TIMER_START(start) cudaEventRecord(start);
 #define TIMER_STOP(msg, start, stop) {                   \
@@ -16,8 +17,8 @@
     std::cout << msg << ": " << ms << "ms" << std::endl; \
 }
 
-constexpr int NUM_POINTS = 2 << 18;
-constexpr int MAX_CODES_PER_LEAF = 16;
+constexpr int NUM_POINTS = 2 << 10;
+constexpr int MAX_CODES_PER_LEAF = 32;
 
 void print_bits(uint32_t u)
 {
@@ -46,10 +47,7 @@ int main()
     // one point only, the number of internal nodes will actually be much
     // smaller
 
-    int num_octree_nodes = min(
-        2 * NUM_POINTS,
-        geometric_sum(8, ceil(log2(NUM_POINTS) / 3.0) + 1));
-    Octree<float> octree(num_octree_nodes);
+    Octree<float> octree(NUM_POINTS);
 
     TIMER_START(start)
     points.compute_morton_codes();
@@ -114,12 +112,30 @@ int main()
     TIMER_STOP("octree-build", start, stop)
 
     TIMER_START(start)
-    octree.compute_nodes_barycenter(points,
-                                    btree.get_d_leaf_first_code_idx_ptr());
+    octree.compute_nodes_points_range(
+        btree.get_d_leaf_first_code_idx_ptr(),
+        points.get_d_codes_first_point_idx_ptr());
+    TIMER_STOP("octree-range", start, stop)
+
+    TIMER_START(start)
+    octree.compute_nodes_barycenter(points);
     TIMER_STOP("octree-barycenters", start, stop)
 
     // h_btree.print();
     octree.print();
+
+    BarnesHut<float> bh(points.get_d_pos(), NUM_POINTS);
+
+    TIMER_START(start)
+    bh.compute_forces(octree,
+                      points.get_d_codes_first_point_idx_ptr(),
+                      btree.get_d_leaf_first_code_idx_ptr(),
+                      num_leaves);
+    TIMER_STOP("bh-traverse", start, stop);
+
+    TIMER_START(start)
+    bh.update_bodies();
+    TIMER_STOP("bodies-update", start, stop);
 
     return 0;
 }

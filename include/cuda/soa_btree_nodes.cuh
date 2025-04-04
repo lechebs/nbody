@@ -43,6 +43,11 @@ public:
         return _right[idx];
     }
 
+    __device__ __forceinline__ int lcp(int idx) const
+    {
+        return _lcp[idx];
+    }
+
     __device__ __forceinline__ const int *edge_delta() const
     {
         return _edge_delta;
@@ -52,19 +57,11 @@ public:
         return _edge_delta[idx];
     }
 
-    const int *leaves_begin() const
-    {
-        return _leaves_begin;
-    }
     __device__ __forceinline__ int leaves_begin(int idx) const
     {
         return _leaves_begin[idx];
     }
 
-    const int *leaves_end() const
-    {
-        return _leaves_end;
-    }
     __device__ __forceinline__ int leaves_end(int idx) const
     {
         return _leaves_end[idx];
@@ -91,6 +88,11 @@ public:
         return _right[idx];
     }
 
+    __device__ __forceinline__ int &lcp(int idx)
+    {
+        return _lcp[idx];
+    }
+
     __device__ __forceinline__ int &edge_delta(int idx)
     {
         return _edge_delta[idx];
@@ -112,6 +114,7 @@ public:
         cudaMalloc(&_depth, num_nodes * sizeof(int));
         cudaMalloc(&_left, num_nodes * sizeof(int));
         cudaMalloc(&_right, num_nodes * sizeof(int));
+        cudaMalloc(&_lcp, num_nodes * sizeof(int));
         cudaMalloc(&_edge_delta, num_nodes * sizeof(int));
         cudaMalloc(&_leaves_begin, num_nodes * sizeof(int));
         cudaMalloc(&_leaves_end, num_nodes * sizeof(int));
@@ -123,6 +126,7 @@ public:
         cudaFree(_depth);
         cudaFree(_left);
         cudaFree(_right);
+        cudaFree(_lcp);
         cudaFree(_edge_delta);
         cudaFree(_leaves_begin);
         cudaFree(_leaves_end);
@@ -133,6 +137,7 @@ private:
     int *_depth;
     int *_left;
     int *_right;
+    int *_lcp;
     int *_edge_delta;
     int *_leaves_begin;
     int *_leaves_end;

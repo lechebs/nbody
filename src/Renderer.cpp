@@ -17,7 +17,7 @@
 #include "ShaderProgram.hpp"
 #include "CUDAWrappers.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 18;
+constexpr unsigned int N_POINTS = 2 << 10;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -30,7 +30,7 @@ Renderer::Renderer(unsigned int window_width,
     _camera(M_PI / 3,
             static_cast<float>(window_width) / window_height,
             -0.01,
-            -10.0) {}
+            -20.0) {}
 
 bool Renderer::init()
 {
@@ -44,18 +44,15 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    CUDAWrappers::BarnesHut::Params p = { N_POINTS, 32 };
-    CUDAWrappers::BarnesHut simulation(p, _particles_ssbo);
+    CUDAWrappers::Simulation::Params p = { N_POINTS, 32 };
+    CUDAWrappers::Simulation simulation(p, _particles_ssbo);
     simulation.samplePoints();
-    simulation.update();
-
 
     while (_running) {
         _handleEvents();
         _updateDeltaTime();
 
-        _shader_program.loadUniformInt("selected_octree_node",
-                                       (SDL_GetTicks64() % 100000) / 100.0);
+        simulation.update();
 
         _updateCamera();
         _renderFrame();
@@ -120,14 +117,28 @@ bool Renderer::_init()
 // Loads, compiles and links OpenGL shaders
 bool Renderer::_loadShaders()
 {
-    // Needs to be called after OpenGL context creation
-    _shader_program.create();
+    const std::array<std::string, 4> shaders_filename = {
+        "shaders/particle.vert",
+        "shaders/particle.frag",
+        "shaders/cube.vert",
+        "shaders/cube.frag"
+    };
 
-    return _shader_program.loadShader("shaders/particle.vert",
-                                      GL_VERTEX_SHADER) &&
-           _shader_program.loadShader("shaders/particle.frag",
-                                      GL_FRAGMENT_SHADER) &&
-           _shader_program.link();
+    bool loaded = true;
+
+    for (int i = 0; i < _NUM_SHADER_PROGRAMS; ++i) {
+        // Needs to be called after OpenGL context creation
+        _shader_programs[i].create();
+
+        loaded = loaded &
+                 _shader_programs[i].loadShader(shaders_filename[2 * i],
+                                                GL_VERTEX_SHADER) &
+                 _shader_programs[i].loadShader(shaders_filename[2 * i + 1],
+                                                GL_FRAGMENT_SHADER) &
+                 _shader_programs[i].link();
+    }
+
+    return loaded;
 }
 
 // Allocates OpenGL buffers to draw a quadrilateral
@@ -147,7 +158,38 @@ void Renderer::_allocBuffers()
     const std::array<unsigned int, 6>
     quad_indices = {
         0, 1, 2,
-        0, 2, 3
+        0, 3, 2
+    };
+
+   // Vertices and indices used to draw a cube outline.
+    const std::array<float, 24>
+    cube_vertices = {
+        -1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f,  1.0f
+    };
+
+    const std::array<unsigned int, 24>
+    cube_indices = {
+        0, 1,
+        1, 2,
+        2, 3,
+        3, 0,
+
+        4, 5,
+        5, 6,
+        6, 7,
+        7, 4,
+
+        0, 7,
+        1, 6,
+        2, 5,
+        3, 4
     };
 
     // Creating a Vertex Array Object to handle quad vertices
@@ -174,6 +216,28 @@ void Renderer::_allocBuffers()
     glBufferData(GL_ELEMENT_ARRAY_BUFFER,
                  sizeof(quad_indices),
                  quad_indices.data(),
+                 GL_STATIC_DRAW);
+
+    glGenVertexArrays(1, &_cube_vao);
+    glBindVertexArray(_cube_vao);
+
+    GLuint cube_vbo;
+    glGenBuffers(1, &cube_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, cube_vbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 sizeof(cube_vertices),
+                 cube_vertices.data(),
+                 GL_STATIC_DRAW);
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 3, 0);
+    glEnableVertexAttribArray(0);
+
+    GLuint cube_ebo;
+    glGenBuffers(1, &cube_ebo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cube_ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                 sizeof(cube_indices),
+                 cube_indices.data(),
                  GL_STATIC_DRAW);
 
     // Sample particles data
@@ -211,6 +275,7 @@ void Renderer::_setupScene()
     // Enabling transparency
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    // glBlendFunc(GL_SRC_ALPHA, GL_ADD);
     // Enabling depth testing
     // glEnable(GL_DEPTH_TEST);
 
@@ -220,8 +285,11 @@ void Renderer::_setupScene()
 
     _camera.setOrbitMode(true);
 
-    _shader_program.loadUniformMat4("perspective_projection",
-                                    _camera.getPerspectiveProjection());
+    for (int i = 0; i < _NUM_SHADER_PROGRAMS; ++i) {
+        _shader_programs[i].loadUniformMat4(
+            "perspective_projection", _camera.getPerspectiveProjection());
+    }
+
     _updateCamera();
 }
 
@@ -246,8 +314,8 @@ void Renderer::_handleEvents()
             _camera.orbit({ 0.1f * event.wheel.preciseY, 0, 0 });
         } else if (event.type == SDL_KEYUP &&
                    event.key.keysym.sym == SDLK_SPACE) {
-            _shader_program.loadUniformInt("selected_octree_node",
-                                           ++curr_node);
+            _shader_programs[PARTICLE_SHADER].loadUniformInt(
+                "selected_octree_node", ++curr_node);
         }
     }
 
@@ -291,19 +359,26 @@ void Renderer::_updateDeltaTime()
 void Renderer::_updateCamera()
 {
     _camera.update(_delta_time);
-    // Updating the GLSL world to camera transformation matrix
-    _shader_program.loadUniformMat4("world_to_camera",
-                                    _camera.getWorldToCamera());
+
+    for (int i = 0; i < _NUM_SHADER_PROGRAMS; ++i) {
+        // Updating the GLSL world to camera transformation matrix
+        _shader_programs[i].loadUniformMat4(
+            "world_to_camera", _camera.getWorldToCamera());
+    }
 }
 
 // Renders a single frame to the window
 void Renderer::_renderFrame()
 {
-    _shader_program.enable();
-
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    // glBindVertexArray(_quad_vao);
+
+    _shader_programs[PARTICLE_SHADER].enable();
+    glBindVertexArray(_quad_vao);
     glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, N_POINTS);
+
+    _shader_programs[CUBE_SHADER].enable();
+    glBindVertexArray(_cube_vao);
+    glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
 
     SDL_GL_SwapWindow(_window);
 }

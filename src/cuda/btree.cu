@@ -288,6 +288,8 @@ __global__ void _build_radix_tree(const uint32_t *codes,
 
     // Length of prefix covered by the internal node
     int node_lcp = _lcp_safe(codes, idx, last);
+    nodes.lcp(2 * idx + 1) = node_lcp;
+
     int split = _find_split(codes, idx, last, node_lcp, d, num_leaves);
 
     int min_leaf = min(idx, last);
@@ -527,22 +529,24 @@ void Btree::sort_to_bfs_order()
         get_max_num_nodes(),
         _sort_op);
 
-    int **in_ptrs[5];
+    int **in_ptrs[6];
     in_ptrs[0] = &_nodes._left;
     in_ptrs[1] = &_nodes._right;
-    in_ptrs[2] = &_nodes._edge_delta;
-    in_ptrs[3] = &_nodes._leaves_begin;
-    in_ptrs[4] = &_nodes._leaves_end;
+    in_ptrs[2] = &_nodes._lcp;
+    in_ptrs[3] = &_nodes._edge_delta;
+    in_ptrs[4] = &_nodes._leaves_begin;
+    in_ptrs[5] = &_nodes._leaves_end;
 
-    int **tmp_ptrs[5];
+    int **tmp_ptrs[6];
     tmp_ptrs[0] = &_tmp_nodes._left;
     tmp_ptrs[1] = &_tmp_nodes._right;
-    tmp_ptrs[2] = &_tmp_nodes._edge_delta;
-    tmp_ptrs[3] = &_tmp_nodes._leaves_begin;
-    tmp_ptrs[4] = &_tmp_nodes._leaves_end;
+    tmp_ptrs[2] = &_tmp_nodes._lcp;
+    tmp_ptrs[3] = &_tmp_nodes._edge_delta;
+    tmp_ptrs[4] = &_tmp_nodes._leaves_begin;
+    tmp_ptrs[5] = &_tmp_nodes._leaves_end;
 
 #pragma unroll
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 6; ++i) {
         // It's faster to gather the arrays to be sorted
         // based on the sorted permutation
         // TODO: gather on multiple streams?

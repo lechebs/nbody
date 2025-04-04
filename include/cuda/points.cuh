@@ -129,7 +129,7 @@ public:
                          MAX_THREADS_PER_BLOCK>>>(_pos, _codes, _num_points);
     }
 
-    void sort_by_codes()
+    void sort_by_codes(SoAVec3<T> vel)
     {
         thrust::sequence(thrust::device, _range, _range + _num_points);
 
@@ -139,7 +139,7 @@ public:
                                         _codes,
                                         _range,
                                         _num_points,
-                                        less_op);
+                                        less_op); 
 
         thrust::gather(thrust::device,
                        _range,
@@ -178,6 +178,27 @@ public:
             swap_ptr(&_pos.y(), &_tmp_pos.y());
             swap_ptr(&_pos.z(), &_tmp_pos.z());
         }
+
+        // TODO: refactor
+        thrust::gather(thrust::device,
+                       _range,
+                       _range + _num_points,
+                       vel.x(),
+                       _tmp_vel.x());
+        thrust::gather(thrust::device,
+                       _range,
+                       _range + _num_points,
+                       vel.y(),
+                       _tmp_vel.y());
+        thrust::gather(thrust::device,
+                       _range,
+                       _range + _num_points,
+                       vel.z(),
+                       _tmp_vel.z());
+
+        swap_ptr(&vel.x(), &_tmp_vel.x());
+        swap_ptr(&vel.y(), &_tmp_vel.y());
+        swap_ptr(&vel.z(), &_tmp_vel.z());
     }
 
     void compute_unique_codes(int *d_num_unique_codes)
@@ -230,6 +251,7 @@ public:
         }
         _tmp_pos.free();
         _scan_pos.free();
+        _tmp_vel.free();
 
         cudaFree(_codes);
         cudaFree(_unique_codes);
@@ -248,6 +270,7 @@ private:
     {
         _tmp_pos.alloc(num_points);
         _scan_pos.alloc(num_points);
+        _tmp_vel.alloc(num_points);
 
         cudaMalloc(&_codes, num_points * sizeof(uint32_t));
         cudaMalloc(&_unique_codes, num_points * sizeof(uint32_t));
@@ -298,6 +321,7 @@ private:
     SoAVec3<T> _pos;
     SoAVec3<T> _tmp_pos;
     SoAVec3<T> _scan_pos;
+    SoAVec3<T> _tmp_vel;
 
     uint32_t *_codes;
     uint32_t *_unique_codes;

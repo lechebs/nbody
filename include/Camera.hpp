@@ -75,7 +75,7 @@ private:
 
     vec3 _target_position;
 
-    const float _MOVE_SPEED = 5.0f;
+    const float _MOVE_SPEED = 10.0f;
 };
 
 #endif

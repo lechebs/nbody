@@ -30,14 +30,12 @@ void main()
     */
 
     vec4 color;
-    if (is_selected > 0) {
-        color = vec4(0.9f, 0.9f, 0.9f, 0.8f);
+    if (false) {//is_selected > 0) {
+        color = vec4(0.1f, 0.8f, 0.1f, 1.0f);
     } else {
-        color = vec4(1.0f, 1.0f, 1.0f, 0.01f);
+        color = vec4(0.8f, 0.8f, 0.8f, 1.0f);
     }
 
-    // float color = particle_id / 8192.0f;
-
     // Simple sphere shading
-    frag_color = color;
+    frag_color = color * vec4(1.0f, 1.0f, 1.0f, (1.0f - r) * 0.8);
 }

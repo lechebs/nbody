@@ -22,6 +22,10 @@ public:
     ~Renderer();
 
 private:
+    enum ShaderProgramId { PARTICLE_SHADER, CUBE_SHADER };
+
+    constexpr static int _NUM_SHADER_PROGRAMS = 2;
+
     bool _init();
     bool _loadShaders();
 
@@ -43,9 +47,10 @@ private:
     std::string _window_title;
 
     GLuint _quad_vao;
+    GLuint _cube_vao;
     GLuint _particles_ssbo[5];
 
-    ShaderProgram _shader_program;
+    ShaderProgram _shader_programs[_NUM_SHADER_PROGRAMS];
 
     Camera _camera;
 
