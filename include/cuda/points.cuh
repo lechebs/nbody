@@ -100,8 +100,8 @@ public:
         thrust::host_vector<T> y(_num_points);
         thrust::host_vector<T> z(_num_points);
 
-        thrust::uniform_real_distribution<T> dist;
-        // thrust::normal_distribution<T> dist(0.5, 0.125);
+        // thrust::uniform_real_distribution<T> dist;
+        thrust::normal_distribution<T> dist(0.5, 0.1);
         auto dist_gen = [&] { return max(0.0, min(1.0, dist(_rng))); };
 
         thrust::generate(x.begin(), x.end(), dist_gen);
@@ -129,7 +129,7 @@ public:
                          MAX_THREADS_PER_BLOCK>>>(_pos, _codes, _num_points);
     }
 
-    void sort_by_codes(SoAVec3<T> vel)
+    void sort_by_codes(SoAVec3<T> &vel)
     {
         thrust::sequence(thrust::device, _range, _range + _num_points);
 
@@ -139,7 +139,7 @@ public:
                                         _codes,
                                         _range,
                                         _num_points,
-                                        less_op); 
+                                        less_op);
 
         thrust::gather(thrust::device,
                        _range,
@@ -172,8 +172,7 @@ public:
                        _tmp_pos.z(),
                        _num_points * sizeof(T),
                        cudaMemcpyDeviceToDevice);
-        } else {
-            // WARNING: is this safe?
+
             swap_ptr(&_pos.x(), &_tmp_pos.x());
             swap_ptr(&_pos.y(), &_tmp_pos.y());
             swap_ptr(&_pos.z(), &_tmp_pos.z());

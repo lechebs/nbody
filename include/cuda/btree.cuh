@@ -60,6 +60,8 @@ public:
         _max_num_leaves = max_num_leaves;
     }
 
+    void reset_max_num_leaves();
+
     // Generates leaf nodes such that each contain no more than
     // max_num_points_per_leaf
     void generate_leaves(const uint32_t *d_sorted_codes,
@@ -136,6 +138,8 @@ public:
     ~Btree();
 
 private:
+    const int _init_max_num_leaves;
+
     int _max_num_leaves;
     int *_num_leaves;
 

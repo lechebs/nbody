@@ -44,7 +44,7 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    CUDAWrappers::Simulation::Params p = { N_POINTS, 32 };
+    CUDAWrappers::Simulation::Params p = { N_POINTS, 16 };
     CUDAWrappers::Simulation simulation(p, _particles_ssbo);
     simulation.samplePoints();
 

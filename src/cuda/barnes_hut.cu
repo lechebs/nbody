@@ -5,7 +5,7 @@
 #include "cuda/octree.cuh"
 
 #define WARP_SIZE 32
-#define EPS 1e-8
+#define EPS 1e-6
 #define GRAVITY 0.1
 
 __device__ __forceinline__ int _warp_scan(int var)
@@ -25,7 +25,7 @@ __device__ __forceinline__ int _warp_scan(int var)
 template<typename T> __device__ __forceinline__
 bool _approx_crit(float size, T dist, float theta)
 {
-    return false;//dist > size / theta;
+    return dist > size / theta;
 }
 
 template<typename T> __device__ __forceinline__
@@ -68,7 +68,7 @@ void _compute_pairwise_force(T p1x, T p1y, T p1z,
 
     T dist = sqrt(dist_x * dist_x +
                   dist_y * dist_y +
-                  dist_z * dist_z) / mass + EPS;
+                  dist_z * dist_z) / mass;
 
     dst_x += dist_x / dist * GRAVITY;
     dst_y += dist_y / dist * GRAVITY;
@@ -330,6 +330,12 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     int group_first_body = codes_first_point_idx[first_code_idx];
     int group_end_body = codes_first_point_idx[end_code_idx];
     int group_num_bodies = group_end_body - group_first_body;
+
+    /*
+    if (threadIdx.x == 0) {
+        printf("[%3d] %03d - %03d\n", blockIdx.x, group_first_body, group_end_body);
+    }
+    */
 
     // We're considering each code as a single body during the
     // traversal, even though it may map to more than one body.
@@ -629,7 +635,7 @@ BarnesHut<T>::BarnesHut(SoAVec3<T> bodies_pos, int num_bodies) :
     _vel.alloc(num_bodies);
     _acc.alloc(num_bodies);
 
-    _vel.rand(num_bodies);
+    // _vel.rand(num_bodies);
 }
 
 template<typename T>
@@ -654,7 +660,7 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
                                  _queues,
                                  _queues + num_octree_leaves * 4096,
                                  1,
-                                 0.8,
+                                 0.5,
                                  num_octree_leaves,
                                  _num_bodies);
 }

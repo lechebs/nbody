@@ -9,7 +9,7 @@ template<typename T> class BarnesHut
 public:
     BarnesHut(SoAVec3<T> bodies_pos, int num_bodies);
 
-    SoAVec3<T> get_d_vel()
+    SoAVec3<T> &get_d_vel()
     {
         return _vel;
     }

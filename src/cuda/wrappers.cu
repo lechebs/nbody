@@ -41,10 +41,11 @@ namespace CUDAWrappers
         {
             //std::cout << "num_unique_codes="
             //          << btree.get_num_leaves() << std::endl;
+            btree.reset_max_num_leaves();
             btree.generate_leaves(points.get_d_unique_codes_ptr(),
                                   max_num_codes_per_leaf);
             int num_leaves = btree.get_num_leaves();
-            // btree.set_max_num_leaves(num_leaves);
+            btree.set_max_num_leaves(num_leaves);
             // std::cout << "num_leaves=" << num_leaves << std::endl;
 
             btree.build(points.get_d_unique_codes_ptr());
@@ -53,7 +54,7 @@ namespace CUDAWrappers
 
             // btree.print();
 
-            // octree.set_max_num_nodes(btree.get_max_num_nodes());
+            octree.set_max_num_nodes(btree.get_max_num_nodes());
             octree.build(btree);
             octree.compute_nodes_points_range(
                 btree.get_d_leaf_first_code_idx_ptr(),

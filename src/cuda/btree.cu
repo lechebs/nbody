@@ -379,7 +379,9 @@ __global__ void _correct_child_pointers(int *left,
     */
 }
 
-Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
+Btree::Btree(int max_num_leaves) :
+    _init_max_num_leaves(max_num_leaves),
+    _max_num_leaves(max_num_leaves)
 {
     cudaMalloc(&_num_leaves, sizeof(int));
     cudaMalloc(&_range, (max_num_leaves + 1) * sizeof(int));
@@ -428,6 +430,11 @@ Btree::Btree(int max_num_leaves) : _max_num_leaves(max_num_leaves)
         _num_launches_compute_nodes_depth++;
     }
     _num_launches_compute_nodes_depth += 3;
+}
+
+void Btree::reset_max_num_leaves()
+{
+    _max_num_leaves = _init_max_num_leaves;
 }
 
 void Btree::generate_leaves(const uint32_t *d_sorted_codes,
