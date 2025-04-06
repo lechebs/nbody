@@ -5,8 +5,8 @@
 #include "cuda/octree.cuh"
 
 #define WARP_SIZE 32
-#define EPS 1e-6
-#define GRAVITY 0.1
+#define EPS 1e-2
+#define GRAVITY 0.5
 
 __device__ __forceinline__ int _warp_scan(int var)
 {
@@ -42,10 +42,10 @@ T _compute_group_to_node_min_dist(const T *x_group,
     #pragma unroll
     for (int i = 0; i < WARP_SIZE; ++i) {
         // Shifting to avoid bank conflicts
-        int j = (i + threadIdx.x) % WARP_SIZE;
-        T dx = x_group[j] - x_node;
-        T dy = y_group[j] - y_node;
-        T dz = z_group[j] - z_node;
+        // int j = (i + threadIdx.x) % WARP_SIZE;
+        T dx = x_group[i] - x_node;
+        T dy = y_group[i] - y_node;
+        T dz = z_group[i] - z_node;
 
         T dist_sq = dx * dx + dy * dy + dz * dz;
         if (dist_sq <= min_dist_sq) {
@@ -66,13 +66,16 @@ void _compute_pairwise_force(T p1x, T p1y, T p1z,
     T dist_y = p2y - p1y;
     T dist_z = p2z - p1z;
 
-    T dist = sqrt(dist_x * dist_x +
-                  dist_y * dist_y +
-                  dist_z * dist_z) / mass;
+    T dist_sq = dist_x * dist_x +
+                dist_y * dist_y +
+                dist_z * dist_z;
 
-    dst_x += dist_x / dist * GRAVITY;
-    dst_y += dist_y / dist * GRAVITY;
-    dst_z += dist_z / dist * GRAVITY;
+    T den = dist_sq + EPS;
+    den = sqrt(den * den * den);
+
+    dst_x += mass * GRAVITY * dist_x / den;
+    dst_y += mass * GRAVITY * dist_y / den;
+    dst_z += mass * GRAVITY * dist_z / den;
 }
 
 __device__ __forceinline__ void _append_to_queue(const int *open_buff,
@@ -119,17 +122,19 @@ __device__ __forceinline__ void _append_to_queue(const int *open_buff,
 
 template<typename T> __device__ __forceinline__
 int _evaluate_approx(const SoAVec3<T> bodies_pos,
-                     SoAVec3<T> bodies_acc,
+                     //SoAVec3<T> bodies_acc,
                      const SoAVec3<T> nodes_barycenter,
                      const int *bodies_begin,
                      const int *bodies_end,
+                     T px, T py, T pz,
+                     T &fx, T &fy, T &fz,
                      int *approx_buff,
                      T *x_buff,
                      T *y_buff,
                      T *z_buff,
-                     int approx_buff_size,
-                     int group_first_body,
-                     int group_num_bodies)
+                     int approx_buff_size)
+                     //int group_first_body,
+                     //int group_num_bodies)
 {
     int start_buff_idx = max(0, approx_buff_size - 32);
 
@@ -145,6 +150,7 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
 
     __syncwarp();
 
+    /*
     // Loop over points in warp in chunks
     for (int j = 0; j + threadIdx.x < group_num_bodies; j += WARP_SIZE) {
         int idx = group_first_body + j + threadIdx.x;
@@ -156,46 +162,58 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
         T fx = 0.0;
         T fy = 0.0;
         T fz = 0.0;
+        */
 
-        int chunk_size = approx_buff_size - start_buff_idx;
-        // #pragma unroll
-        for (int k = 0; k < chunk_size; ++k) {
-            _compute_pairwise_force(px,
-                                    py,
-                                    pz,
-                                    x_buff[k],
-                                    y_buff[k],
-                                    z_buff[k],
-                                    (T) approx_buff[k],
-                                    fx,
-                                    fy,
-                                    fz);
-        }
+    int chunk_size = approx_buff_size - start_buff_idx;
+    // #pragma unroll
+    for (int k = 0; k < chunk_size; ++k) {
+        _compute_pairwise_force(px,
+                                py,
+                                pz,
+                                x_buff[k],
+                                y_buff[k],
+                                z_buff[k],
+                                (T) approx_buff[k],
+                                fx,
+                                fy,
+                                fz);
+    }
 
+    /*
         bodies_acc.x(idx) += fx;
         bodies_acc.y(idx) += fy;
         bodies_acc.z(idx) += fz;
     }
+    */
 
     return start_buff_idx;
 }
 
 template<typename T> __device__ __forceinline__
 void _evaluate_leaf(const SoAVec3<T> bodies_pos,
-                    SoAVec3<T> bodies_acc,
+                    // SoAVec3<T> bodies_acc,
                     const int *bodies_begin,
                     const int *bodies_end,
                     int leaf,
                     T *x_buff,
                     T *y_buff,
                     T *z_buff,
+                    T px,
+                    T py,
+                    T pz,
+                    T &fx,
+                    T &fy,
+                    T &fz
+                    /*
                     int group_first_body,
-                    int group_num_bodies)
+                    int group_num_bodies
+                    */)
 {
     int leaf_first_body = bodies_begin[leaf];
     int leaf_num_bodies = bodies_end[leaf] - leaf_first_body + 1;
 
     // Loop over points in warp in chunks
+    /*
     for (int j = 0; j < group_num_bodies; j += WARP_SIZE) {
         int idx = group_first_body + j + threadIdx.x;
 
@@ -210,61 +228,49 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
             py = bodies_pos.y(idx);
             pz = bodies_pos.z(idx);
         }
+    */
 
-        // Load bodies into shared memory in chunks
-        for (int k = 0; k < leaf_num_bodies; k += WARP_SIZE) {
-            __syncwarp();
+    // Load leaf bodies into shared memory in chunks
+    for (int k = 0; k < leaf_num_bodies; k += WARP_SIZE) {
 
-            if (k + threadIdx.x < leaf_num_bodies) {
-                int id = leaf_first_body + k + threadIdx.x;
-                x_buff[threadIdx.x] = bodies_pos.x(id);
-                y_buff[threadIdx.x] = bodies_pos.y(id);
-                z_buff[threadIdx.x] = bodies_pos.z(id);
-            }
+        if (k + threadIdx.x < leaf_num_bodies) {
+            int body_idx = leaf_first_body + k + threadIdx.x;
+            x_buff[threadIdx.x] = bodies_pos.x(body_idx);
+            y_buff[threadIdx.x] = bodies_pos.y(body_idx);
+            z_buff[threadIdx.x] = bodies_pos.z(body_idx);
+        }
+        __syncwarp();
 
-            __syncwarp();
-
+        /*
             if (j + threadIdx.x >= group_num_bodies) {
                 continue;
             }
+        */
 
-            bool is_same_leaf_chunk = leaf_first_body + k ==
-                                      group_first_body + j;
-
-            // #pragma unroll
-            for (int b = 0; b + k < leaf_num_bodies; ++b) {
-                /*
-                if (b + k >= leaf_num_bodies) {
-                    break;
-                } 
-                */
-
-                if (!(is_same_leaf_chunk && b == threadIdx.x)) {
-                    if (threadIdx.x == 0 && blockIdx.x == 0) {
-                        /*
-                        printf("%03d - %03d\n",
-                               group_first_body + j,
-                               leaf_first_body + k + b);
-                        */
-                    }
-                    _compute_pairwise_force(px,
-                                            py,
-                                            pz,
-                                            x_buff[b],
-                                            y_buff[b],
-                                            z_buff[b],
-                                            (T) 1.0,
-                                            fx,
-                                            fy,
-                                            fz);
-                }
-            }
+        int chunk_size = min(k + 32, leaf_num_bodies) - k;
+        // #pragma unroll
+        for (int b = 0; b < chunk_size; ++b) {
+            _compute_pairwise_force(px,
+                                    py,
+                                    pz,
+                                    x_buff[b],
+                                    y_buff[b],
+                                    z_buff[b],
+                                    (T) 1.0,
+                                    fx,
+                                    fy,
+                                    fz);
         }
-
-        bodies_acc.x(idx) += fx;
-        bodies_acc.y(idx) += fy;
-        bodies_acc.z(idx) += fz;
     }
+
+    /*
+        if (j + threadIdx.x < group_num_bodies) {
+            bodies_acc.x(idx) += fx;
+            bodies_acc.y(idx) += fy;
+            bodies_acc.z(idx) += fz;
+        }
+    }
+    */
 }
 
 template<typename T>
@@ -283,7 +289,8 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                      int num_leaves,
                                      int num_bodies)
 {
-    if (blockIdx.x >= num_leaves) {
+    int body_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (body_idx >= num_bodies) {
         return;
     }
 
@@ -306,13 +313,14 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     __shared__ T z_buff[WARP_SIZE];
 
     __shared__ int approx_buff[WARP_SIZE * 2];
+    // __shared__ int leaf_buff[WARP_SIZE];
     __shared__ int open_buff[WARP_SIZE + 4];
     __shared__ int nchildren_buff[WARP_SIZE + 4];
 
-    // __shared__ int queue_buff[8192];
+    // __shared__ int queue_buff[512];
 
-    queue += blockIdx.x * 4096;
-    next_queue += num_leaves * 4096 + blockIdx.x * 4096;
+    queue += blockIdx.x * 8192;
+    next_queue += (num_bodies / 32) * 8192 + blockIdx.x * 8192;
 
     /*
     queue = &queue_buff[0];
@@ -321,20 +329,15 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 
     int approx_buff_size = 0;
     int open_buff_size = 0;
+    int leaves_eval = 0;
 
-    int tot_queue_size = 0;
-
+    /*
     int first_code_idx = leaf_first_code_idx[blockIdx.x];
     int end_code_idx = leaf_first_code_idx[blockIdx.x + 1];
 
     int group_first_body = codes_first_point_idx[first_code_idx];
     int group_end_body = codes_first_point_idx[end_code_idx];
     int group_num_bodies = group_end_body - group_first_body;
-
-    /*
-    if (threadIdx.x == 0) {
-        printf("[%3d] %03d - %03d\n", blockIdx.x, group_first_body, group_end_body);
-    }
     */
 
     // We're considering each code as a single body during the
@@ -344,6 +347,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     // Nevertheless, when forces need to be evaluated,
     // all points covered by the codes are considered.
 
+    /*
     int num_codes = end_code_idx - first_code_idx;
     // Index of the first point covered by the current code
     int code_pos_idx =
@@ -352,15 +356,27 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     T cx = bodies_pos.x(code_pos_idx);
     T cy = bodies_pos.y(code_pos_idx);
     T cz = bodies_pos.z(code_pos_idx);
+    */
+
+    T px = bodies_pos.x(body_idx);
+    T py = bodies_pos.y(body_idx);
+    T pz = bodies_pos.z(body_idx);
+
+    T fx = 0.0;
+    T fy = 0.0;
+    T fz = 0.0;
+
+    // TODO: prefill with nodes from lower levels
+    queue[0] = 0;
 
     while (queue_size > 0) {
         int next_queue_size = 0;
         // Process each node in the queue in round-robin fashion
         for (int i = 0; i < queue_size; i += WARP_SIZE) {
 
-            x_buff[threadIdx.x] = cx;
-            y_buff[threadIdx.x] = cy;
-            z_buff[threadIdx.x] = cz;
+            x_buff[threadIdx.x] = px;
+            y_buff[threadIdx.x] = py;
+            z_buff[threadIdx.x] = pz;
 
             // Ensure memory ordering
             __syncwarp();
@@ -406,6 +422,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
             }
 
             // In-warp exclusive scan to obtain scatter indices
+            // int leaf_node_scatter = _warp_scan(is_leaf);
             int approx_node_scatter = _warp_scan(approx_node);
             int open_node_scatter = _warp_scan(open_node);
             int nchildren_scatter = _warp_scan(open_node * num_children);
@@ -419,6 +436,10 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
             */
 
             // Compaction into buffers
+            /*if (is_leaf) {
+                leaf_buff[leaf_node_scatter] = node;
+            } else */
+
             if (approx_node) {
                 int idx = approx_buff_size + approx_node_scatter;
                 approx_buff[idx] = node;
@@ -430,7 +451,8 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
             }
 
             // Update offset to allow buffering scatter indices
-
+            // TODO: there has to be a simpler way, just get the
+            // last element of the inclusive scan
             unsigned int open_mask = __ballot_sync(0xffffffff, open_node);
             int last_nchildren = 0;
             int last_open_lane = 32 - __ffs(__brev(open_mask));
@@ -464,6 +486,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 
             // Append children nodes to next queue
             // TODO: try to evaluate when open_buff_size > 4, or more
+            // e.g. when open_buff_size > 32
             if (open_buff_size > 0) {
                 int num_nodes = nchildren_buff[open_buff_size - 1] +
                                 last_nchildren;
@@ -478,7 +501,6 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 open_buff_size = 0;
                 // nchildren_offset = 0;
                 next_queue_size += num_nodes;
-                tot_queue_size += num_nodes;
 
                 /*
                 if (blockIdx.x == 0 && threadIdx.x == 0) {
@@ -498,32 +520,42 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
             while ((src_lane = __fns(leaf_mask, 0, n)) < 32) {
                 int leaf = __shfl_sync(0xffffffff, node, src_lane);
                 _evaluate_leaf(bodies_pos,
-                               bodies_acc,
                                bodies_begin,
                                bodies_end,
                                leaf,
                                x_buff,
                                y_buff,
                                z_buff,
-                               group_first_body,
-                               group_num_bodies);
+                               px,
+                               py,
+                               pz,
+                               fx,
+                               fy,
+                               fz);
                 n++;
+                leaves_eval++;
             }
 
             // Evaluate cluster interaction list
             if (approx_buff_size >= 32) {
                 approx_buff_size = _evaluate_approx(bodies_pos,
-                                                    bodies_acc,
+                                                    //bodies_acc,
                                                     nodes_barycenter,
                                                     bodies_begin,
                                                     bodies_end,
+                                                    px,
+                                                    py,
+                                                    pz,
+                                                    fx,
+                                                    fy,
+                                                    fz,
                                                     approx_buff,
                                                     x_buff,
                                                     y_buff,
                                                     z_buff,
-                                                    approx_buff_size,
-                                                    group_first_body,
-                                                    group_num_bodies);
+                                                    approx_buff_size);
+                                                    //group_first_body,
+                                                    //group_num_bodies);
             }
         }
 
@@ -536,21 +568,46 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 
     if (approx_buff_size > 0) {
         approx_buff_size = _evaluate_approx(bodies_pos,
-                                            bodies_acc,
                                             nodes_barycenter,
                                             bodies_begin,
                                             bodies_end,
+                                            px,
+                                            py,
+                                            pz,
+                                            fx,
+                                            fy,
+                                            fz,
                                             approx_buff,
                                             x_buff,
                                             y_buff,
                                             z_buff,
-                                            approx_buff_size,
-                                            group_first_body,
-                                            group_num_bodies);
+                                            approx_buff_size);
+                                                    //group_first_body,
+                                                    //group_num_bodies);
         approx_buff_size = 0;
     }
 
-    // Loop over points in warp in chunks
+    /*
+    _compute_pairwise_force(px,
+                            py,
+                            pz,
+                            (T) 0.5,
+                            (T) 0.5,
+                            (T) 0.5,
+                            (T) 100.0,
+                            fx,
+                            fy,
+                            fz);
+                            */
+
+    bodies_acc.x(body_idx) = fx;
+    bodies_acc.y(body_idx) = fy;
+    bodies_acc.z(body_idx) = fz;
+
+    if (blockIdx.x == 0 && threadIdx.x == 0)
+        printf("%d\n", leaves_eval);
+
+    /*
     for (int j = 0; j + threadIdx.x < group_num_bodies; j += WARP_SIZE) {
         int idx = group_first_body + j + threadIdx.x;
 
@@ -568,7 +625,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                 (T) 0.5,
                                 (T) 0.5,
                                 (T) 0.5,
-                                (T) 500.0,
+                                (T) 100.0,
                                 fx,
                                 fy,
                                 fz);
@@ -577,7 +634,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
         bodies_acc.y(idx) += fy;
         bodies_acc.z(idx) += fz;
     }
-
+    */
 }
 
 template<typename T>
@@ -630,12 +687,12 @@ BarnesHut<T>::BarnesHut(SoAVec3<T> bodies_pos, int num_bodies) :
     _num_bodies(num_bodies)
 {
     // Allocate space for traversal queues
-    cudaMalloc(&_queues, 2 * num_bodies * 4096 * sizeof(int));
+    cudaMalloc(&_queues, 2 * num_bodies * 8192 * sizeof(int));
 
     _vel.alloc(num_bodies);
     _acc.alloc(num_bodies);
 
-    // _vel.rand(num_bodies);
+    _vel.rand(num_bodies);
 }
 
 template<typename T>
@@ -645,11 +702,9 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
                                   int num_octree_leaves)
 {
     _acc.zeros(_num_bodies);
-    // Clear input queue
-    cudaMemset(_queues, 0, 2 * num_octree_leaves * 4096 * sizeof(int));
 
-    _barnes_hut_traverse<<<
-        num_octree_leaves, 32>>>(_pos,
+    _barnes_hut_traverse<<<_num_bodies / 32 + (_num_bodies % 32 > 0), 32>>>
+        /*num_octree_leaves, 32>>>*/(_pos,
                                  _acc,
                                  octree.get_d_nodes(),
                                  octree.get_d_barycenters(),
@@ -658,7 +713,7 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
                                  codes_first_point_idx,
                                  leaf_first_code_idx,
                                  _queues,
-                                 _queues + num_octree_leaves * 4096,
+                                 _queues + (_num_bodies / 32) * 8192,
                                  1,
                                  0.5,
                                  num_octree_leaves,
