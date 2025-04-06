@@ -100,8 +100,8 @@ public:
         thrust::host_vector<T> y(_num_points);
         thrust::host_vector<T> z(_num_points);
 
-        // thrust::uniform_real_distribution<T> dist;
-        thrust::normal_distribution<T> dist(0.5, 0.1);
+        thrust::uniform_real_distribution<T> dist;
+        // thrust::normal_distribution<T> dist(0.5, 0.125);
         auto dist_gen = [&] { return max(0.0, min(1.0, dist(_rng))); };
 
         thrust::generate(x.begin(), x.end(), dist_gen);

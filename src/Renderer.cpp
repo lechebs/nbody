@@ -17,7 +17,7 @@
 #include "ShaderProgram.hpp"
 #include "CUDAWrappers.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 10;
+constexpr unsigned int N_POINTS = 2 << 16;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -44,7 +44,7 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    CUDAWrappers::Simulation::Params p = { N_POINTS, 16 };
+    CUDAWrappers::Simulation::Params p = { N_POINTS, 32 };
     CUDAWrappers::Simulation simulation(p, _particles_ssbo);
     simulation.samplePoints();
 

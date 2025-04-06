@@ -46,7 +46,7 @@ namespace CUDAWrappers
                                   max_num_codes_per_leaf);
             int num_leaves = btree.get_num_leaves();
             btree.set_max_num_leaves(num_leaves);
-            // std::cout << "num_leaves=" << num_leaves << std::endl;
+            std::cout << "num_leaves=" << num_leaves << std::endl;
 
             btree.build(points.get_d_unique_codes_ptr());
             btree.sort_to_bfs_order();
@@ -115,9 +115,21 @@ namespace CUDAWrappers
 
     void Simulation::update()
     {
+        cudaEvent_t start, stop;
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+
+        cudaEventRecord(start);
         _impl->updatePoints();
         int num_leaves = _impl->updateOctree(_params.max_num_codes_per_leaf);
         _impl->updateBodies(num_leaves);
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+
+        float ms;
+        cudaEventElapsedTime(&ms, start, stop);
+
+        std::cout << "elapsed=" << ms << std::endl;
     }
 
     Simulation::~Simulation() {}

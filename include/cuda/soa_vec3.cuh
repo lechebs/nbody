@@ -39,12 +39,46 @@ public:
 
         for (int i = 0; i < 3; ++i) {
             for (int j = 0; j < n; ++j) {
-                buff[j] = ((T) std::rand() - RAND_MAX / 2) / RAND_MAX / 2 * 10;
+                buff[j] = ((T) std::rand() - RAND_MAX / 2) / RAND_MAX / 2;
             }
             cudaMemcpy(dst[i], buff, n * sizeof(T), cudaMemcpyHostToDevice);
         }
 
         std::free(buff);
+    }
+
+    void tangent(const SoAVec3<T> _pos, int n)
+    {
+        T *x_pos = (T *) std::malloc(n * sizeof(T));
+        T *y_pos = (T *) std::malloc(n * sizeof(T));
+        T *z_pos = (T *) std::malloc(n * sizeof(T));
+
+        cudaMemcpy(x_pos, _pos._x, n * sizeof(T), cudaMemcpyDeviceToHost);
+        cudaMemcpy(y_pos, _pos._y, n * sizeof(T), cudaMemcpyDeviceToHost);
+        cudaMemcpy(z_pos, _pos._z, n * sizeof(T), cudaMemcpyDeviceToHost);
+
+        T *x_dst = (T *) std::malloc(n * sizeof(T));
+        T *y_dst = (T *) std::malloc(n * sizeof(T));
+        T *z_dst = (T *) std::malloc(n * sizeof(T));
+
+        for (int i = 0; i < n; ++i) {
+            T x = x_pos[i] - 0.5;
+            T y = y_pos[i] - 0.5;
+            x_dst[i] = -y * 500;
+            y_dst[i] = x * 500;
+            z_dst[i] = 0;//(std::rand() - RAND_MAX / 2 ) / RAND_MAX / 2 * 500;
+        }
+
+        cudaMemcpy(_x, x_dst, n * sizeof(T), cudaMemcpyHostToDevice);
+        cudaMemcpy(_y, y_dst, n * sizeof(T), cudaMemcpyHostToDevice);
+        cudaMemcpy(_z, z_dst, n * sizeof(T), cudaMemcpyHostToDevice);
+
+        std::free(x_pos);
+        std::free(y_pos);
+        std::free(z_pos);
+        std::free(x_dst);
+        std::free(y_dst);
+        std::free(z_dst);
     }
 
     void free()

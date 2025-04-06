@@ -24,7 +24,7 @@ public:
     ~BarnesHut();
 
 private:
-    const T _dt = 0.0001;
+    const T _dt = 0.00005;
 
     int _num_bodies;
 

@@ -37,5 +37,5 @@ void main()
     }
 
     // Simple sphere shading
-    frag_color = color * vec4(1.0f, 1.0f, 1.0f, (1.0f - r) * 0.8);
+    frag_color = color * vec4(1.0f, 1.0f, 1.0f, (1.0f - r) * 0.3);
 }

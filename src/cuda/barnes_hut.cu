@@ -6,7 +6,7 @@
 
 #define WARP_SIZE 32
 #define EPS 1e-2
-#define GRAVITY 0.5
+#define GRAVITY 0.05
 
 __device__ __forceinline__ int _warp_scan(int var)
 {
@@ -53,7 +53,7 @@ T _compute_group_to_node_min_dist(const T *x_group,
         }
     }
 
-    return min_dist_sq;
+    return sqrt(min_dist_sq);
 }
 
 template<typename T> __device__ __forceinline__
@@ -331,6 +331,8 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     int open_buff_size = 0;
     int leaves_eval = 0;
 
+    int tot_queue_size = 0;
+
     /*
     int first_code_idx = leaf_first_code_idx[blockIdx.x];
     int end_code_idx = leaf_first_code_idx[blockIdx.x + 1];
@@ -501,6 +503,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 open_buff_size = 0;
                 // nchildren_offset = 0;
                 next_queue_size += num_nodes;
+                tot_queue_size += num_nodes;
 
                 /*
                 if (blockIdx.x == 0 && threadIdx.x == 0) {
@@ -594,18 +597,18 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                             (T) 0.5,
                             (T) 0.5,
                             (T) 0.5,
-                            (T) 100.0,
+                            (T) 2000.0,
                             fx,
                             fy,
                             fz);
-                            */
+    */
 
     bodies_acc.x(body_idx) = fx;
     bodies_acc.y(body_idx) = fy;
     bodies_acc.z(body_idx) = fz;
 
     if (blockIdx.x == 0 && threadIdx.x == 0)
-        printf("%d\n", leaves_eval);
+        printf("%d, %d\n", tot_queue_size, leaves_eval);
 
     /*
     for (int j = 0; j + threadIdx.x < group_num_bodies; j += WARP_SIZE) {
@@ -687,12 +690,12 @@ BarnesHut<T>::BarnesHut(SoAVec3<T> bodies_pos, int num_bodies) :
     _num_bodies(num_bodies)
 {
     // Allocate space for traversal queues
-    cudaMalloc(&_queues, 2 * num_bodies * 8192 * sizeof(int));
+    cudaMalloc(&_queues, 2 * (num_bodies / 16) * 8192 * sizeof(int));
 
     _vel.alloc(num_bodies);
     _acc.alloc(num_bodies);
 
-    _vel.rand(num_bodies);
+    // _vel.rand(num_bodies);
 }
 
 template<typename T>
@@ -701,6 +704,13 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
                                   const int *leaf_first_code_idx,
                                   int num_octree_leaves)
 {
+    static int init = 0;
+
+    if (!init) {
+        init = 1;
+        // _vel.tangent(_pos, _num_bodies);
+    }
+
     _acc.zeros(_num_bodies);
 
     _barnes_hut_traverse<<<_num_bodies / 32 + (_num_bodies % 32 > 0), 32>>>
@@ -715,7 +725,7 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
                                  _queues,
                                  _queues + (_num_bodies / 32) * 8192,
                                  1,
-                                 0.5,
+                                 0.95,
                                  num_octree_leaves,
                                  _num_bodies);
 }
