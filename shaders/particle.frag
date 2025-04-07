@@ -33,7 +33,7 @@ void main()
     if (false) {//is_selected > 0) {
         color = vec4(0.1f, 0.8f, 0.1f, 1.0f);
     } else {
-        color = vec4(0.8f, 0.8f, 0.8f, 1.0f);
+        color = vec4(0.8f, 0.8f, 0.6f, 1.0f);
     }
 
     // Simple sphere shading

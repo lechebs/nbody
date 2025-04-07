@@ -100,13 +100,15 @@ public:
         thrust::host_vector<T> y(_num_points);
         thrust::host_vector<T> z(_num_points);
 
-        thrust::uniform_real_distribution<T> dist;
-        // thrust::normal_distribution<T> dist(0.5, 0.125);
+        // thrust::uniform_real_distribution<T> dist;
+        thrust::normal_distribution<T> dist(0.5, 0.1);
         auto dist_gen = [&] { return max(0.0, min(1.0, dist(_rng))); };
 
         thrust::generate(x.begin(), x.end(), dist_gen);
         thrust::generate(y.begin(), y.end(), dist_gen);
-        thrust::generate(z.begin(), z.end(), dist_gen);
+
+        auto dist_gen2 = [&] { return 0.4 + max(0.0, min(1.0, dist(_rng))) * 0.2; };
+        thrust::generate(z.begin(), z.end(), dist_gen2);
 
         cudaMemcpy(_pos.x(),
                    thrust::raw_pointer_cast(&x[0]),
@@ -120,6 +122,11 @@ public:
                    thrust::raw_pointer_cast(&z[0]),
                    _num_points * sizeof(T),
                    cudaMemcpyHostToDevice);
+    }
+
+    void sample_plummer()
+    {
+        _pos.plummer(_num_points, 0.2);
     }
 
     void compute_morton_codes()

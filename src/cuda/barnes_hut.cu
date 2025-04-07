@@ -6,7 +6,7 @@
 
 #define WARP_SIZE 32
 #define EPS 1e-2
-#define GRAVITY 0.05
+#define GRAVITY 0.1
 
 __device__ __forceinline__ int _warp_scan(int var)
 {
@@ -590,18 +590,16 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
         approx_buff_size = 0;
     }
 
-    /*
     _compute_pairwise_force(px,
                             py,
                             pz,
                             (T) 0.5,
                             (T) 0.5,
                             (T) 0.5,
-                            (T) 2000.0,
+                            (T) 1000.0,
                             fx,
                             fy,
                             fz);
-    */
 
     bodies_acc.x(body_idx) = fx;
     bodies_acc.y(body_idx) = fy;
@@ -656,6 +654,10 @@ __global__ void _forward_euler(SoAVec3<T> bodies_pos,
     T y = bodies_pos.y(idx);
     T z = bodies_pos.z(idx);
 
+    bodies_vel.x(idx) += bodies_acc.x(idx) * dt;
+    bodies_vel.y(idx) += bodies_acc.y(idx) * dt;
+    bodies_vel.z(idx) += bodies_acc.z(idx) * dt;
+
     x += bodies_vel.x(idx) * dt;
     y += bodies_vel.y(idx) * dt;
     z += bodies_vel.z(idx) * dt;
@@ -674,10 +676,6 @@ __global__ void _forward_euler(SoAVec3<T> bodies_pos,
         bodies_vel.z(idx) *= -0.5;
         z = max(0.0, min(1.0, z));
     }
-
-    bodies_vel.x(idx) += bodies_acc.x(idx) * dt;
-    bodies_vel.y(idx) += bodies_acc.y(idx) * dt;
-    bodies_vel.z(idx) += bodies_acc.z(idx) * dt;
 
     bodies_pos.x(idx) = x;
     bodies_pos.y(idx) = y;
@@ -708,7 +706,7 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
 
     if (!init) {
         init = 1;
-        // _vel.tangent(_pos, _num_bodies);
+        _vel.plummer_vel(_pos, _num_bodies, 0.2);
     }
 
     _acc.zeros(_num_bodies);
@@ -725,7 +723,7 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
                                  _queues,
                                  _queues + (_num_bodies / 32) * 8192,
                                  1,
-                                 0.95,
+                                 0.75,
                                  num_octree_leaves,
                                  _num_bodies);
 }

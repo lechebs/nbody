@@ -110,7 +110,8 @@ namespace CUDAWrappers
 
     void Simulation::samplePoints()
     {
-        _impl->points.sample_uniform();
+        //_impl->points.sample_uniform();
+        _impl->points.sample_plummer();
     }
 
     void Simulation::update()

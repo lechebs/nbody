@@ -44,7 +44,7 @@ void main()
     particle_world_pos -= vec3(0.5f, 0.5f, 0.5f);
 
     // Determines the size of the particle
-    particle_radius = 0.006;
+    particle_radius = 0.003;
     // Position in camera coordinates
     particle_eye_pos = world_to_camera * vec4(particle_world_pos, 1.0f);
 
