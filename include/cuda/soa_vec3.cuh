@@ -160,7 +160,7 @@ public:
             T vx = -theta * y / r;
             T vy = theta * x / r;
 
-            x_dst[i] = vx * 0.2 * 1.5 + std::rand() / RAND_MAX * 2 - 1.0;
+            x_dst[i] = vx * 0.2 + std::rand() / RAND_MAX * 2 - 1.0;
             y_dst[i] = vy * 0.2 + std::rand() / RAND_MAX * 2 - 1.0;
             z_dst[i] = 0;
         }

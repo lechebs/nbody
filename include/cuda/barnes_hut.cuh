@@ -7,26 +7,43 @@
 template<typename T> class BarnesHut
 {
 public:
-    BarnesHut(SoAVec3<T> bodies_pos, int num_bodies);
+    BarnesHut(SoAVec3<T> bodies_pos, int num_bodies, float theta, float dt);
 
     SoAVec3<T> &get_d_vel()
     {
         return _vel;
     }
 
-    void compute_forces(const Octree<T> &octree,
-                        const int *codes_first_point_idx,
-                        const int *leaf_first_code_idx,
-                        int num_leaves);
+    SoAVec3<T> &get_d_acc()
+    {
+        return _acc;
+    }
 
-    void update_bodies();
+    // TODO: takes this parameters from constructor
+    void solve_pos(const Octree<T> &octree,
+                   const int *codes_first_point_idx,
+                   const int *leaf_first_code_idx,
+                   int num_leaves);
+
+    void solve_vel(const Octree<T> &octree,
+                   const int *codes_first_point_idx,
+                   const int *leaf_first_code_idx,
+                   int num_leaves);
 
     ~BarnesHut();
 
 private:
-    const T _dt = 0.00005;
+    void _compute_forces(const Octree<T> &octree,
+                         const int *codes_first_point_idx,
+                         const int *leaf_first_code_idx,
+                         int num_leaves);
+
+    void _update_pos();
+    void _update_vel();
 
     int _num_bodies;
+    float _theta;
+    float _dt;
 
     SoAVec3<T> _pos;
     SoAVec3<T> _vel;

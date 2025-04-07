@@ -596,14 +596,14 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                             (T) 0.5,
                             (T) 0.5,
                             (T) 0.5,
-                            (T) 1000.0,
+                            (T) 2000.0,
                             fx,
                             fy,
                             fz);
 
-    bodies_acc.x(body_idx) = fx;
-    bodies_acc.y(body_idx) = fy;
-    bodies_acc.z(body_idx) = fz;
+    bodies_acc.x(body_idx) += fx;
+    bodies_acc.y(body_idx) += fy;
+    bodies_acc.z(body_idx) += fz;
 
     if (blockIdx.x == 0 && threadIdx.x == 0)
         printf("%d, %d\n", tot_queue_size, leaves_eval);
@@ -639,11 +639,31 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 }
 
 template<typename T>
-__global__ void _forward_euler(SoAVec3<T> bodies_pos,
-                               SoAVec3<T> bodies_vel,
-                               const SoAVec3<T> bodies_acc,
-                               T dt,
-                               int num_bodies)
+__device__ void _impose_boundary_conditions(T &x, T &y, T &z,
+                                            T &vx, T &vy, T &vz)
+{
+    if (x < 0 || x > 1.0) {
+        vx *= -0.5;
+        x = max(0.0, min(1.0, x));
+    }
+
+    if (y < 0 || y > 1.0) {
+        vy *= -0.5;
+        y = max(0.0, min(1.0, y));
+    }
+
+    if (z < 0 || z > 1.0) {
+        vz *= -0.5;
+        z = max(0.0, min(1.0, z));
+    }
+}
+
+template<typename T>
+__global__ void _integrate_semi_implicit_euler(SoAVec3<T> bodies_pos,
+                                               SoAVec3<T> bodies_vel,
+                                               const SoAVec3<T> bodies_acc,
+                                               T dt,
+                                               int num_bodies)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_bodies) {
@@ -654,38 +674,90 @@ __global__ void _forward_euler(SoAVec3<T> bodies_pos,
     T y = bodies_pos.y(idx);
     T z = bodies_pos.z(idx);
 
-    bodies_vel.x(idx) += bodies_acc.x(idx) * dt;
-    bodies_vel.y(idx) += bodies_acc.y(idx) * dt;
-    bodies_vel.z(idx) += bodies_acc.z(idx) * dt;
+    T vx = bodies_vel.x(idx);
+    T vy = bodies_vel.y(idx);
+    T vz = bodies_vel.z(idx);
 
-    x += bodies_vel.x(idx) * dt;
-    y += bodies_vel.y(idx) * dt;
-    z += bodies_vel.z(idx) * dt;
+    bodies_vel.x(idx) = vx + bodies_acc.x(idx) * dt;
+    bodies_vel.y(idx) = vy + bodies_acc.y(idx) * dt;
+    bodies_vel.z(idx) = vz + bodies_acc.z(idx) * dt;
 
-    if (x < 0 || x > 1.0) {
-        bodies_vel.x(idx) *= -0.5;
-        x = max(0.0, min(1.0, x));
-    }
+    x += vx * dt;
+    y += vy * dt;
+    z += vz * dt;
 
-    if (y < 0 || y > 1.0) {
-        bodies_vel.y(idx) *= -0.5;
-        y = max(0.0, min(1.0, y));
-    }
-
-    if (z < 0 || z > 1.0) {
-        bodies_vel.z(idx) *= -0.5;
-        z = max(0.0, min(1.0, z));
-    }
+    _impose_boundary_conditions(x, y, z, vx, vy, vz);
 
     bodies_pos.x(idx) = x;
     bodies_pos.y(idx) = y;
     bodies_pos.z(idx) = z;
+
+    bodies_vel.x(idx) = vx;
+    bodies_vel.y(idx) = vy;
+    bodies_pos.z(idx) = vz;
 }
 
 template<typename T>
-BarnesHut<T>::BarnesHut(SoAVec3<T> bodies_pos, int num_bodies) :
+__global__ void _leapfrog_integrate_pos(SoAVec3<T> pos,
+                                        SoAVec3<T> vel,
+                                        const SoAVec3<T> acc,
+                                        float dt,
+                                        int num_bodies)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= num_bodies) {
+        return;
+    }
+
+    T x = pos.x(idx);
+    T y = pos.y(idx);
+    T z = pos.z(idx);
+
+    T vx = vel.x(idx);
+    T vy = vel.y(idx);
+    T vz = vel.z(idx);
+
+    x += vx * dt + 0.5 * acc.x(idx) * dt * dt;
+    y += vy * dt + 0.5 * acc.y(idx) * dt * dt;
+    z += vz * dt + 0.5 * acc.z(idx) * dt * dt;
+
+    _impose_boundary_conditions(x, y, z, vx, vy, vz);
+
+    pos.x(idx) = x;
+    pos.y(idx) = y;
+    pos.z(idx) = z;
+
+    vel.x(idx) = vx;
+    vel.y(idx) = vy;
+    vel.z(idx) = vz;
+}
+
+template<typename T>
+__global__ void _leapfrog_integrate_vel(SoAVec3<T> vel,
+                                        const SoAVec3<T> acc,
+                                        float dt,
+                                        int num_bodies)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= num_bodies) {
+        return;
+    }
+
+    vel.x(idx) += 0.5 * acc.x(idx) * dt;
+    vel.y(idx) += 0.5 * acc.y(idx) * dt;
+    vel.z(idx) += 0.5 * acc.z(idx) * dt;
+}
+
+
+template<typename T>
+BarnesHut<T>::BarnesHut(SoAVec3<T> bodies_pos,
+                        int num_bodies,
+                        float theta,
+                        float dt) :
     _pos(bodies_pos),
-    _num_bodies(num_bodies)
+    _num_bodies(num_bodies),
+    _theta(theta),
+    _dt(dt)
 {
     // Allocate space for traversal queues
     cudaMalloc(&_queues, 2 * (num_bodies / 16) * 8192 * sizeof(int));
@@ -697,13 +769,12 @@ BarnesHut<T>::BarnesHut(SoAVec3<T> bodies_pos, int num_bodies) :
 }
 
 template<typename T>
-void BarnesHut<T>::compute_forces(const Octree<T> &octree,
-                                  const int *codes_first_point_idx,
-                                  const int *leaf_first_code_idx,
-                                  int num_octree_leaves)
+void BarnesHut<T>::solve_pos(const Octree<T> &octree,
+                             const int *codes_first_point_idx,
+                             const int *leaf_first_code_idx,
+                             int num_octree_leaves)
 {
     static int init = 0;
-
     if (!init) {
         init = 1;
         _vel.plummer_vel(_pos, _num_bodies, 0.2);
@@ -711,6 +782,35 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
 
     _acc.zeros(_num_bodies);
 
+    _compute_forces(octree,
+                    codes_first_point_idx,
+                    leaf_first_code_idx,
+                    num_octree_leaves);
+
+    _update_pos();
+}
+
+template<typename T>
+void BarnesHut<T>::solve_vel(const Octree<T> &octree,
+                             const int *codes_first_point_idx,
+                             const int *leaf_first_code_idx,
+                             int num_octree_leaves)
+{
+    _compute_forces(octree,
+                    codes_first_point_idx,
+                    leaf_first_code_idx,
+                    num_octree_leaves);
+
+    _update_vel();
+}
+
+
+template<typename T>
+void BarnesHut<T>::_compute_forces(const Octree<T> &octree,
+                                   const int *codes_first_point_idx,
+                                   const int *leaf_first_code_idx,
+                                   int num_octree_leaves)
+{
     _barnes_hut_traverse<<<_num_bodies / 32 + (_num_bodies % 32 > 0), 32>>>
         /*num_octree_leaves, 32>>>*/(_pos,
                                  _acc,
@@ -723,21 +823,32 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
                                  _queues,
                                  _queues + (_num_bodies / 32) * 8192,
                                  1,
-                                 0.75,
+                                 _theta,
                                  num_octree_leaves,
                                  _num_bodies);
 }
 
 template<typename T>
-void BarnesHut<T>::update_bodies()
+void BarnesHut<T>::_update_pos()
 {
-    _forward_euler<<<_num_bodies / MAX_THREADS_PER_BLOCK +
-                     (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
-                     MAX_THREADS_PER_BLOCK>>>(_pos,
-                                              _vel,
-                                              _acc,
-                                              _dt,
-                                              _num_bodies);
+    _leapfrog_integrate_pos<<<_num_bodies / MAX_THREADS_PER_BLOCK +
+                              (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
+                              MAX_THREADS_PER_BLOCK>>>(_pos,
+                                                       _vel,
+                                                       _acc,
+                                                       _dt,
+                                                       _num_bodies);
+}
+
+template<typename T>
+void BarnesHut<T>::_update_vel()
+{
+    _leapfrog_integrate_vel<<<_num_bodies / MAX_THREADS_PER_BLOCK +
+                              (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
+                              MAX_THREADS_PER_BLOCK>>>(_vel,
+                                                       _acc,
+                                                       _dt,
+                                                       _num_bodies);
 }
 
 template<typename T>

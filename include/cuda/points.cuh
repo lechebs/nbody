@@ -100,15 +100,13 @@ public:
         thrust::host_vector<T> y(_num_points);
         thrust::host_vector<T> z(_num_points);
 
-        // thrust::uniform_real_distribution<T> dist;
-        thrust::normal_distribution<T> dist(0.5, 0.1);
+        thrust::uniform_real_distribution<T> dist;
+        // thrust::normal_distribution<T> dist(0.5, 0.1);
         auto dist_gen = [&] { return max(0.0, min(1.0, dist(_rng))); };
 
         thrust::generate(x.begin(), x.end(), dist_gen);
         thrust::generate(y.begin(), y.end(), dist_gen);
-
-        auto dist_gen2 = [&] { return 0.4 + max(0.0, min(1.0, dist(_rng))) * 0.2; };
-        thrust::generate(z.begin(), z.end(), dist_gen2);
+        thrust::generate(z.begin(), z.end(), dist_gen);
 
         cudaMemcpy(_pos.x(),
                    thrust::raw_pointer_cast(&x[0]),
@@ -136,7 +134,7 @@ public:
                          MAX_THREADS_PER_BLOCK>>>(_pos, _codes, _num_points);
     }
 
-    void sort_by_codes(SoAVec3<T> &vel)
+    void sort_by_codes(SoAVec3<T> &vel, SoAVec3<T> &acc)
     {
         thrust::sequence(thrust::device, _range, _range + _num_points);
 
@@ -205,6 +203,26 @@ public:
         swap_ptr(&vel.x(), &_tmp_vel.x());
         swap_ptr(&vel.y(), &_tmp_vel.y());
         swap_ptr(&vel.z(), &_tmp_vel.z());
+
+        thrust::gather(thrust::device,
+                       _range,
+                       _range + _num_points,
+                       acc.x(),
+                       _tmp_acc.x());
+        thrust::gather(thrust::device,
+                       _range,
+                       _range + _num_points,
+                       acc.y(),
+                       _tmp_acc.y());
+        thrust::gather(thrust::device,
+                       _range,
+                       _range + _num_points,
+                       acc.z(),
+                       _tmp_acc.z());
+
+        swap_ptr(&acc.x(), &_tmp_acc.x());
+        swap_ptr(&acc.y(), &_tmp_acc.y());
+        swap_ptr(&acc.z(), &_tmp_acc.z());
     }
 
     void compute_unique_codes(int *d_num_unique_codes)
@@ -258,6 +276,7 @@ public:
         _tmp_pos.free();
         _scan_pos.free();
         _tmp_vel.free();
+        _tmp_acc.free();
 
         cudaFree(_codes);
         cudaFree(_unique_codes);
@@ -277,6 +296,7 @@ private:
         _tmp_pos.alloc(num_points);
         _scan_pos.alloc(num_points);
         _tmp_vel.alloc(num_points);
+        _tmp_acc.alloc(num_points);
 
         cudaMalloc(&_codes, num_points * sizeof(uint32_t));
         cudaMalloc(&_unique_codes, num_points * sizeof(uint32_t));
@@ -328,6 +348,7 @@ private:
     SoAVec3<T> _tmp_pos;
     SoAVec3<T> _scan_pos;
     SoAVec3<T> _tmp_vel;
+    SoAVec3<T> _tmp_acc;
 
     uint32_t *_codes;
     uint32_t *_unique_codes;

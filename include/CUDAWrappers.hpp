@@ -15,6 +15,8 @@ namespace CUDAWrappers
         {
             int num_points;
             int max_num_codes_per_leaf;
+            float theta;
+            float dt;
         };
 
         Simulation(Params &params);
