@@ -1,6 +1,8 @@
 #ifndef POINTS_CUH
 #define POINTS_CUH
 
+#include <iostream>
+
 #include "cuda/utils.cuh"
 #include "cuda/soa_vec3.cuh"
 
@@ -10,7 +12,6 @@
 #include <thrust/generate.h>
 #include <thrust/random.h>
 #include <thrust/sequence.h>
-#include <thrust/gather.h>
 
 #include <cub/device/device_merge_sort.cuh>
 #include <cub/device/device_partition.cuh>
@@ -84,6 +85,11 @@ public:
         return _codes_first_point_idx;
     }
 
+    SoAVec3<T> &get_d_pos()
+    {
+        return _pos;
+    }
+
     const SoAVec3<T> &get_d_pos() const
     {
         return _pos;
@@ -146,21 +152,9 @@ public:
                                         _num_points,
                                         less_op);
 
-        thrust::gather(thrust::device,
-                       _range,
-                       _range + _num_points,
-                       _pos.x(),
-                       _tmp_pos.x());
-        thrust::gather(thrust::device,
-                       _range,
-                       _range + _num_points,
-                       _pos.y(),
-                       _tmp_pos.y());
-        thrust::gather(thrust::device,
-                       _range,
-                       _range + _num_points,
-                       _pos.z(),
-                       _tmp_pos.z());
+        _tmp_pos.gather(_pos, _range, _num_points);
+        _tmp_vel.gather(vel, _range, _num_points);
+        _tmp_acc.gather(acc, _range, _num_points);
 
         if (_gl_buffers) {
             // Copying back to original buffer since it's where
@@ -177,52 +171,12 @@ public:
                        _tmp_pos.z(),
                        _num_points * sizeof(T),
                        cudaMemcpyDeviceToDevice);
-
-            swap_ptr(&_pos.x(), &_tmp_pos.x());
-            swap_ptr(&_pos.y(), &_tmp_pos.y());
-            swap_ptr(&_pos.z(), &_tmp_pos.z());
+        } else {
+            _pos.swap(_tmp_pos);
         }
 
-        // TODO: refactor
-        thrust::gather(thrust::device,
-                       _range,
-                       _range + _num_points,
-                       vel.x(),
-                       _tmp_vel.x());
-        thrust::gather(thrust::device,
-                       _range,
-                       _range + _num_points,
-                       vel.y(),
-                       _tmp_vel.y());
-        thrust::gather(thrust::device,
-                       _range,
-                       _range + _num_points,
-                       vel.z(),
-                       _tmp_vel.z());
-
-        swap_ptr(&vel.x(), &_tmp_vel.x());
-        swap_ptr(&vel.y(), &_tmp_vel.y());
-        swap_ptr(&vel.z(), &_tmp_vel.z());
-
-        thrust::gather(thrust::device,
-                       _range,
-                       _range + _num_points,
-                       acc.x(),
-                       _tmp_acc.x());
-        thrust::gather(thrust::device,
-                       _range,
-                       _range + _num_points,
-                       acc.y(),
-                       _tmp_acc.y());
-        thrust::gather(thrust::device,
-                       _range,
-                       _range + _num_points,
-                       acc.z(),
-                       _tmp_acc.z());
-
-        swap_ptr(&acc.x(), &_tmp_acc.x());
-        swap_ptr(&acc.y(), &_tmp_acc.y());
-        swap_ptr(&acc.z(), &_tmp_acc.z());
+        vel.swap(_tmp_vel);
+        acc.swap(_tmp_acc);
     }
 
     void compute_unique_codes(int *d_num_unique_codes)

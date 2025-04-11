@@ -7,7 +7,7 @@
 template<typename T> class BarnesHut
 {
 public:
-    BarnesHut(SoAVec3<T> bodies_pos, int num_bodies, float theta, float dt);
+    BarnesHut(SoAVec3<T> &bodies_pos, int num_bodies, float theta, float dt);
 
     SoAVec3<T> &get_d_vel()
     {
@@ -45,7 +45,7 @@ private:
     float _theta;
     float _dt;
 
-    SoAVec3<T> _pos;
+    SoAVec3<T> &_pos;
     SoAVec3<T> _vel;
     SoAVec3<T> _acc;
 

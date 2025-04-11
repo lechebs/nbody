@@ -5,8 +5,8 @@
 #include "cuda/octree.cuh"
 
 #define WARP_SIZE 32
-#define EPS 1e-2
-#define GRAVITY 0.1
+#define EPS 1e-2f
+#define GRAVITY 0.01f
 
 __device__ __forceinline__ int _warp_scan(int var)
 {
@@ -37,7 +37,7 @@ T _compute_group_to_node_min_dist(const T *x_group,
                                   T z_node)
 {
     // WARNING: coordinates are within the unit cube
-    T min_dist_sq = 3;
+    T min_dist_sq = (T) 3.0f;
 
     #pragma unroll
     for (int i = 0; i < WARP_SIZE; ++i) {
@@ -53,7 +53,7 @@ T _compute_group_to_node_min_dist(const T *x_group,
         }
     }
 
-    return sqrt(min_dist_sq);
+    return sqrtf(min_dist_sq);
 }
 
 template<typename T> __device__ __forceinline__
@@ -70,12 +70,12 @@ void _compute_pairwise_force(T p1x, T p1y, T p1z,
                 dist_y * dist_y +
                 dist_z * dist_z;
 
-    T den = dist_sq + EPS;
-    den = sqrt(den * den * den);
+    T den = dist_sq + (T) EPS;
+    den = sqrtf(den * den * den);
 
-    dst_x += mass * GRAVITY * dist_x / den;
-    dst_y += mass * GRAVITY * dist_y / den;
-    dst_z += mass * GRAVITY * dist_z / den;
+    dst_x += mass * (T) GRAVITY * dist_x / den;
+    dst_y += mass * (T) GRAVITY * dist_y / den;
+    dst_z += mass * (T) GRAVITY * dist_z / den;
 }
 
 __device__ __forceinline__ void _append_to_queue(const int *open_buff,
@@ -364,9 +364,9 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     T py = bodies_pos.y(body_idx);
     T pz = bodies_pos.z(body_idx);
 
-    T fx = 0.0;
-    T fy = 0.0;
-    T fz = 0.0;
+    T fx = (T) 0.0f;
+    T fy = (T) 0.0f;
+    T fz = (T) 0.0f;
 
     // TODO: prefill with nodes from lower levels
     queue[0] = 0;
@@ -590,23 +590,27 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
         approx_buff_size = 0;
     }
 
+    /*
     _compute_pairwise_force(px,
                             py,
                             pz,
-                            (T) 0.5,
-                            (T) 0.5,
-                            (T) 0.5,
-                            (T) 2000.0,
+                            (T) 0.5f,
+                            (T) 0.5f,
+                            (T) 0.5f,
+                            (T) 3000.0f,
                             fx,
                             fy,
                             fz);
+    */
 
     bodies_acc.x(body_idx) += fx;
     bodies_acc.y(body_idx) += fy;
     bodies_acc.z(body_idx) += fz;
 
-    if (blockIdx.x == 0 && threadIdx.x == 0)
+    /*
+    if (blockIdx.x < 10 && threadIdx.x == 0)
         printf("%d, %d\n", tot_queue_size, leaves_eval);
+        */
 
     /*
     for (int j = 0; j + threadIdx.x < group_num_bodies; j += WARP_SIZE) {
@@ -642,19 +646,19 @@ template<typename T>
 __device__ void _impose_boundary_conditions(T &x, T &y, T &z,
                                             T &vx, T &vy, T &vz)
 {
-    if (x < 0 || x > 1.0) {
-        vx *= -0.5;
-        x = max(0.0, min(1.0, x));
+    if (x < 0.0f || x > 1.0f) {
+        vx *= -0.5f;
+        x = max(0.0f, min(1.0f, x));
     }
 
-    if (y < 0 || y > 1.0) {
-        vy *= -0.5;
-        y = max(0.0, min(1.0, y));
+    if (y < 0.0f || y > 1.0f) {
+        vy *= -0.5f;
+        y = max(0.0f, min(1.0f, y));
     }
 
-    if (z < 0 || z > 1.0) {
-        vz *= -0.5;
-        z = max(0.0, min(1.0, z));
+    if (z < 0.0f || z > 1.0f) {
+        vz *= -0.5f;
+        z = max(0.0f, min(1.0f, z));
     }
 }
 
@@ -717,9 +721,9 @@ __global__ void _leapfrog_integrate_pos(SoAVec3<T> pos,
     T vy = vel.y(idx);
     T vz = vel.z(idx);
 
-    x += vx * dt + 0.5 * acc.x(idx) * dt * dt;
-    y += vy * dt + 0.5 * acc.y(idx) * dt * dt;
-    z += vz * dt + 0.5 * acc.z(idx) * dt * dt;
+    x += vx * dt + 0.5f * acc.x(idx) * dt * dt;
+    y += vy * dt + 0.5f * acc.y(idx) * dt * dt;
+    z += vz * dt + 0.5f * acc.z(idx) * dt * dt;
 
     _impose_boundary_conditions(x, y, z, vx, vy, vz);
 
@@ -743,14 +747,14 @@ __global__ void _leapfrog_integrate_vel(SoAVec3<T> vel,
         return;
     }
 
-    vel.x(idx) += 0.5 * acc.x(idx) * dt;
-    vel.y(idx) += 0.5 * acc.y(idx) * dt;
-    vel.z(idx) += 0.5 * acc.z(idx) * dt;
+    vel.x(idx) += 0.5f * acc.x(idx) * dt;
+    vel.y(idx) += 0.5f * acc.y(idx) * dt;
+    vel.z(idx) += 0.5f * acc.z(idx) * dt;
 }
 
 
 template<typename T>
-BarnesHut<T>::BarnesHut(SoAVec3<T> bodies_pos,
+BarnesHut<T>::BarnesHut(SoAVec3<T> &bodies_pos,
                         int num_bodies,
                         float theta,
                         float dt) :
@@ -777,7 +781,7 @@ void BarnesHut<T>::solve_pos(const Octree<T> &octree,
     static int init = 0;
     if (!init) {
         init = 1;
-        _vel.plummer_vel(_pos, _num_bodies, 0.2);
+        //_vel.plummer_vel(_pos, _num_bodies, 0.2);
     }
 
     _acc.zeros(_num_bodies);

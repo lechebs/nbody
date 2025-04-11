@@ -4,7 +4,8 @@
 #include <cstdlib>
 #include <cmath>
 
-#include <iostream>
+#include <thrust/execution_policy.h>
+#include <thrust/gather.h>
 
 template<typename T> class SoAVec3
 {
@@ -48,6 +49,30 @@ public:
         }
 
         std::free(buff);
+    }
+
+    void swap(SoAVec3<T> &other)
+    {
+        T *tmp;
+
+        tmp = _x;
+        _x = other._x;
+        other._x = tmp;
+
+        tmp = _y;
+        _y = other._y;
+        other._y = tmp;
+
+        tmp = _z;
+        _z = other._z;
+        other._z = tmp;
+    }
+
+    void gather(const SoAVec3<T> &src, int *map, int n)
+    {
+        thrust::gather(thrust::device, map, map + n, src._x, _x);
+        thrust::gather(thrust::device, map, map + n, src._y, _y);
+        thrust::gather(thrust::device, map, map + n, src._z, _z);
     }
 
     void tangent(const SoAVec3<T> _pos, int n)
@@ -96,8 +121,6 @@ public:
             T r = a * std::pow((std::pow(u, -2.0 / 3) - 1), -0.5);
 
             z[i] = (T) std::rand() / RAND_MAX * 2 - 1.0;
-
-            std::cout << z[i] << std::endl;
 
             T r_xy = std::sqrt(1 - z[i] * z[i]);
             T theta = (T) std::rand() / RAND_MAX * 2 * M_PI;
