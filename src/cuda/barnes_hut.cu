@@ -5,7 +5,7 @@
 #include "cuda/octree.cuh"
 
 #define WARP_SIZE 32
-#define EPS 1e-2f
+#define EPS 1.0f
 #define GRAVITY 0.01f
 
 __device__ __forceinline__ int _warp_scan(int var)
@@ -25,7 +25,7 @@ __device__ __forceinline__ int _warp_scan(int var)
 template<typename T> __device__ __forceinline__
 bool _approx_crit(float size, T dist, float theta)
 {
-    return dist > size / theta;
+    return size / dist < theta;
 }
 
 template<typename T> __device__ __forceinline__
@@ -90,14 +90,15 @@ __device__ __forceinline__ void _append_to_queue(const int *open_buff,
         // Iterative binary search
 
         int left = 0;
-        int step = open_buff_size >> 1;
+        int step = open_buff_size;
         // TODO: check if this works
-        while (step > 0) {
-            if (j + threadIdx.x >= nchildren_buff[left + step]) {
+        do {
+            step = (step + 1) >> 1;
+            if (left + step < open_buff_size &&
+                j + threadIdx.x >= nchildren_buff[left + step]) {
                 left += step;
             }
-            step >>= 1;
-        }
+        } while (step > 1);
 
         /*
         int left = 0;
@@ -290,6 +291,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                      int num_bodies)
 {
     int body_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // WARNING: number of bodies should be multiple of 32
     if (body_idx >= num_bodies) {
         return;
     }
@@ -317,10 +319,13 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     __shared__ int open_buff[WARP_SIZE + 4];
     __shared__ int nchildren_buff[WARP_SIZE + 4];
 
-    // __shared__ int queue_buff[512];
+    //__shared__ int queue_buff[2048];
 
     queue += blockIdx.x * 8192;
     next_queue += (num_bodies / 32) * 8192 + blockIdx.x * 8192;
+
+    //queue = queue_buff;
+    //next_queue = queue_buff + 1024;
 
     /*
     queue = &queue_buff[0];
@@ -399,26 +404,28 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 T by = nodes_barycenter.y(node);
                 T bz = nodes_barycenter.z(node);
 
-                T min_dist_sq = _compute_group_to_node_min_dist(x_buff,
-                                                                y_buff,
-                                                                z_buff,
-                                                                bx,
-                                                                by,
-                                                                bz);
+                T min_dist = _compute_group_to_node_min_dist(x_buff,
+                                                             y_buff,
+                                                             z_buff,
+                                                             bx,
+                                                             by,
+                                                             bz);
 
                 num_children = nodes.num_children(node);
                 first_child = nodes.first_child(node);
                 float size = nodes.size(node);
 
                 is_leaf = num_children == 0;
-                approx_node = _approx_crit(size, min_dist_sq, theta) &&
+                approx_node = _approx_crit(size, min_dist, theta) &&
                             !is_leaf;
                 open_node = !is_leaf && !approx_node;
 
                 /*
                 if (blockIdx.x == 0) {
-                    printf("[%04d] node=%04d leaf=%d approx=%d open=%d, size=%.3f\n",
-                           threadIdx.x, node, is_leaf, approx_node, open_node, size);
+                    printf("[%04d] node=%04d leaf=%d approx=%d open=%d size=%.3f "
+                           "(%.3f, %.3f, %.3f) child=%d num_children=%d\n",
+                           threadIdx.x, node, is_leaf, approx_node, open_node, size,
+                           bx, by, bz, first_child, num_children);
                 }
                 */
             }
@@ -477,10 +484,15 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 
             /*
             if (blockIdx.x == 0 && threadIdx.x == 0) {
-                printf("approx_size=%d open_size=%d\n",
-                       approx_buff_size, open_buff_size);
+                //printf("approx_size=%d open_size=%d\n",
+                //       approx_buff_size, open_buff_size);
+                printf("approx = ");
+                for (int k = 0; k < approx_buff_size; ++k) {
+                    printf(" %d", approx_buff[k]);
+                }
+                printf("\nopen = ");
                 for (int k = 0; k < open_buff_size; ++k) {
-                    printf(" %d", nchildren_buff[k]);
+                    printf(" %d", open_buff[k]);
                 }
                 printf("\n");
             }
@@ -506,8 +518,8 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 tot_queue_size += num_nodes;
 
                 /*
-                if (blockIdx.x == 0 && threadIdx.x == 0) {
-                    printf("[");
+                if (body_idx == 0) {
+                    printf("open = [");
                     for (int j = 0; j < next_queue_size; ++j) {
                         printf(" %d", next_queue[j]);
                     }
@@ -587,7 +599,6 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                             approx_buff_size);
                                                     //group_first_body,
                                                     //group_num_bodies);
-        approx_buff_size = 0;
     }
 
     /*
@@ -769,7 +780,7 @@ BarnesHut<T>::BarnesHut(SoAVec3<T> &bodies_pos,
     _vel.alloc(num_bodies);
     _acc.alloc(num_bodies);
 
-    // _vel.rand(num_bodies);
+    _vel.rand(num_bodies);
 }
 
 template<typename T>
@@ -781,7 +792,7 @@ void BarnesHut<T>::solve_pos(const Octree<T> &octree,
     static int init = 0;
     if (!init) {
         init = 1;
-        //_vel.plummer_vel(_pos, _num_bodies, 0.2);
+        _vel.tangent(_pos, _num_bodies);
     }
 
     _acc.zeros(_num_bodies);
