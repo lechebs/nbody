@@ -1,11 +1,13 @@
 #include "cuda/barnes_hut.cuh"
 
+#include <cassert>
+
 #include "cuda/soa_vec3.cuh"
 #include "cuda/soa_octree_nodes.cuh"
 #include "cuda/octree.cuh"
 
 #define WARP_SIZE 32
-#define EPS 1.0f
+#define EPS 1e-2f
 #define GRAVITY 0.01f
 
 __device__ __forceinline__ int _warp_scan(int var)
@@ -112,6 +114,9 @@ __device__ __forceinline__ void _append_to_queue(const int *open_buff,
 
         int queue_dst = queue_size + j + threadIdx.x;
 
+        if (queue_dst > 8192)
+        printf("%d %d\n", blockIdx.x, threadIdx.x);
+
         __syncwarp(__activemask());
 
         queue[queue_dst] = open_buff[left] +
@@ -137,13 +142,20 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
                      //int group_first_body,
                      //int group_num_bodies)
 {
+
     int start_buff_idx = max(0, approx_buff_size - 32);
+
+    //return start_buff_idx;
 
     if (threadIdx.x < approx_buff_size) {
         int node = approx_buff[start_buff_idx + threadIdx.x];
+        /*
+        if (blockIdx.x == 0)
+            printf("%2d %4d\n", threadIdx.x, node);
+        */
         // Reuse buffer to hold cluster mass
-        approx_buff[threadIdx.x] = bodies_end[node] -
-                                   bodies_begin[node] + 1;
+        approx_buff[start_buff_idx + threadIdx.x] =
+            bodies_end[node] - bodies_begin[node] + 1;
         x_buff[threadIdx.x] = nodes_barycenter.x(node);
         y_buff[threadIdx.x] = nodes_barycenter.y(node);
         z_buff[threadIdx.x] = nodes_barycenter.z(node);
@@ -174,7 +186,7 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
                                 x_buff[k],
                                 y_buff[k],
                                 z_buff[k],
-                                (T) approx_buff[k],
+                                (T) approx_buff[start_buff_idx + k],
                                 fx,
                                 fy,
                                 fz);
@@ -319,13 +331,13 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     __shared__ int open_buff[WARP_SIZE + 4];
     __shared__ int nchildren_buff[WARP_SIZE + 4];
 
-    //__shared__ int queue_buff[2048];
+    //__shared__ int queue_buff[4096];
 
     queue += blockIdx.x * 8192;
-    next_queue += (num_bodies / 32) * 8192 + blockIdx.x * 8192;
+    next_queue += blockIdx.x * 8192;
 
     //queue = queue_buff;
-    //next_queue = queue_buff + 1024;
+    //next_queue = queue_buff + 2048;
 
     /*
     queue = &queue_buff[0];
@@ -334,7 +346,6 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 
     int approx_buff_size = 0;
     int open_buff_size = 0;
-    int leaves_eval = 0;
 
     int tot_queue_size = 0;
 
@@ -364,6 +375,10 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     T cy = bodies_pos.y(code_pos_idx);
     T cz = bodies_pos.z(code_pos_idx);
     */
+
+    int n_opened = 0;
+    int n_approx = 0;
+    int n_leaves = 0;
 
     T px = bodies_pos.x(body_idx);
     T py = bodies_pos.y(body_idx);
@@ -490,6 +505,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 for (int k = 0; k < approx_buff_size; ++k) {
                     printf(" %d", approx_buff[k]);
                 }
+                printf("\n");
                 printf("\nopen = ");
                 for (int k = 0; k < open_buff_size; ++k) {
                     printf(" %d", open_buff[k]);
@@ -502,6 +518,8 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
             // TODO: try to evaluate when open_buff_size > 4, or more
             // e.g. when open_buff_size > 32
             if (open_buff_size > 0) {
+                n_opened += open_buff_size;
+
                 int num_nodes = nchildren_buff[open_buff_size - 1] +
                                 last_nchildren;
 
@@ -515,6 +533,11 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 open_buff_size = 0;
                 // nchildren_offset = 0;
                 next_queue_size += num_nodes;
+
+                if (next_queue_size > 8192)
+                    printf("ERROR: queue too small! %d %d\n", threadIdx.x, blockIdx.x);
+
+
                 tot_queue_size += num_nodes;
 
                 /*
@@ -548,11 +571,12 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                fy,
                                fz);
                 n++;
-                leaves_eval++;
+                n_leaves++;
             }
 
             // Evaluate cluster interaction list
             if (approx_buff_size >= 32) {
+                n_approx += 32;
                 approx_buff_size = _evaluate_approx(bodies_pos,
                                                     //bodies_acc,
                                                     nodes_barycenter,
@@ -582,6 +606,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     }
 
     if (approx_buff_size > 0) {
+        n_approx += approx_buff_size;
         approx_buff_size = _evaluate_approx(bodies_pos,
                                             nodes_barycenter,
                                             bodies_begin,
@@ -651,6 +676,10 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
         bodies_acc.z(idx) += fz;
     }
     */
+
+    if (body_idx == 0) {
+        printf("opened=%d, approx=%d, leaves=%d\n", n_opened, n_approx, n_leaves);
+    }
 }
 
 template<typename T>
@@ -658,17 +687,17 @@ __device__ void _impose_boundary_conditions(T &x, T &y, T &z,
                                             T &vx, T &vy, T &vz)
 {
     if (x < 0.0f || x > 1.0f) {
-        vx *= -0.5f;
+        vx *= -1.0f;
         x = max(0.0f, min(1.0f, x));
     }
 
     if (y < 0.0f || y > 1.0f) {
-        vy *= -0.5f;
+        vy *= -1.0f;
         y = max(0.0f, min(1.0f, y));
     }
 
     if (z < 0.0f || z > 1.0f) {
-        vz *= -0.5f;
+        vz *= -1.0f;
         z = max(0.0f, min(1.0f, z));
     }
 }
@@ -775,7 +804,7 @@ BarnesHut<T>::BarnesHut(SoAVec3<T> &bodies_pos,
     _dt(dt)
 {
     // Allocate space for traversal queues
-    cudaMalloc(&_queues, 2 * (num_bodies / 16) * 8192 * sizeof(int));
+    cudaMalloc(&_queues, 2 * (num_bodies / 32) * 8192 * sizeof(int));
 
     _vel.alloc(num_bodies);
     _acc.alloc(num_bodies);
