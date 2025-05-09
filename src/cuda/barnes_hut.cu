@@ -57,7 +57,7 @@ T _compute_group_to_node_min_dist(const T *x_group,
         }
     }
 
-    return sqrtf(min_dist_sq);
+    return __fsqrt_rn(min_dist_sq);
 }
 
 template<typename T> __device__ __forceinline__
@@ -74,12 +74,12 @@ void _compute_pairwise_force(T p1x, T p1y, T p1z,
                 dist_y * dist_y +
                 dist_z * dist_z;
 
-    T den = dist_sq + (T) EPS;
-    den = sqrtf(den * den * den);
+    T inv_den = dist_sq + (T) EPS;
+    inv_den = __frsqrt_rn(inv_den * inv_den * inv_den);
 
-    dst_x += mass * (T) GRAVITY * dist_x / den;
-    dst_y += mass * (T) GRAVITY * dist_y / den;
-    dst_z += mass * (T) GRAVITY * dist_z / den;
+    dst_x += mass * (T) GRAVITY * dist_x * inv_den;
+    dst_y += mass * (T) GRAVITY * dist_y * inv_den;
+    dst_z += mass * (T) GRAVITY * dist_z * inv_den;
 }
 
 __device__ __forceinline__ void _append_to_queue(const int *open_buff,
@@ -781,7 +781,7 @@ void BarnesHut<T>::solve_pos(const Octree<T> &octree,
     static int init = 0;
     if (!init) {
         init = 1;
-        //_vel.tangent(_pos, _num_bodies);
+        _vel.tangent(_pos, _num_bodies);
     }
 
     _acc.zeros(_num_bodies);
