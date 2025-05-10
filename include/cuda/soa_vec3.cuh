@@ -51,6 +51,35 @@ public:
         std::free(buff);
     }
 
+    void sphere(int n, float r)
+    {
+        T *x_buff = (T *) std::malloc(n * sizeof(T));
+        T *y_buff = (T *) std::malloc(n * sizeof(T));
+        T *z_buff = (T *) std::malloc(n * sizeof(T));
+
+        for (int i = 0; i < n; ++i) {
+            T rad = std::pow((T) std::rand() / RAND_MAX, 1. / 3) * r;
+            T theta = std::acos(2.0 * std::rand() / RAND_MAX - 1.0);
+            T phi = (T) std::rand() / RAND_MAX * 2 * M_PI;
+
+            x_buff[i] = 0.5 + rad * std::sin(theta) * std::cos(phi);
+                //(T) std::rand() / RAND_MAX * 0.1 - 0.05;
+            y_buff[i] = 0.5 + rad * std::sin(theta) * std::sin(phi);
+                //(T) std::rand() / RAND_MAX * 0.1 - 0.05;
+            z_buff[i] = 0.5 + rad * std::cos(theta);
+                //(T) std::rand() / RAND_MAX * 0.1 - 0.05;
+
+        }
+
+        cudaMemcpy(_x, x_buff, n * sizeof(T), cudaMemcpyHostToDevice);
+        cudaMemcpy(_y, y_buff, n * sizeof(T), cudaMemcpyHostToDevice);
+        cudaMemcpy(_z, z_buff, n * sizeof(T), cudaMemcpyHostToDevice);
+
+        std::free(x_buff);
+        std::free(y_buff);
+        std::free(z_buff);
+    }
+
     void swap(SoAVec3<T> &other)
     {
         T *tmp;
@@ -75,7 +104,7 @@ public:
         thrust::gather(thrust::device, map, map + n, src._z, _z);
     }
 
-    void tangent(const SoAVec3<T> _pos, int n)
+    void hubble(const SoAVec3<T> _pos, int n, float h0)
     {
         T *x_pos = (T *) std::malloc(n * sizeof(T));
         T *y_pos = (T *) std::malloc(n * sizeof(T));
@@ -92,10 +121,48 @@ public:
         for (int i = 0; i < n; ++i) {
             T x = x_pos[i] - 0.5;
             T y = y_pos[i] - 0.5;
+            T z = z_pos[i] - 0.5;
+            T r = std::sqrt(x * x + y * y + z * z);
+            x_dst[i] = x * h0 * r;
+            y_dst[i] = y * h0 * r;
+            z_dst[i] = z * h0 * r;
+        }
+
+        cudaMemcpy(_x, x_dst, n * sizeof(T), cudaMemcpyHostToDevice);
+        cudaMemcpy(_y, y_dst, n * sizeof(T), cudaMemcpyHostToDevice);
+        cudaMemcpy(_z, z_dst, n * sizeof(T), cudaMemcpyHostToDevice);
+
+        std::free(x_pos);
+        std::free(y_pos);
+        std::free(z_pos);
+        std::free(x_dst);
+        std::free(y_dst);
+        std::free(z_dst);
+    }
+
+    void tangent(const SoAVec3<T> _pos, int n)
+    {
+        std::srand(100);
+
+        T *x_pos = (T *) std::malloc(n * sizeof(T));
+        T *y_pos = (T *) std::malloc(n * sizeof(T));
+        T *z_pos = (T *) std::malloc(n * sizeof(T));
+
+        cudaMemcpy(x_pos, _pos._x, n * sizeof(T), cudaMemcpyDeviceToHost);
+        cudaMemcpy(y_pos, _pos._y, n * sizeof(T), cudaMemcpyDeviceToHost);
+        cudaMemcpy(z_pos, _pos._z, n * sizeof(T), cudaMemcpyDeviceToHost);
+
+        T *x_dst = (T *) std::malloc(n * sizeof(T));
+        T *y_dst = (T *) std::malloc(n * sizeof(T));
+        T *z_dst = (T *) std::malloc(n * sizeof(T));
+
+        for (int i = 0; i < n; ++i) {
+            T x = x_pos[i] - 0.5;
+            T y = y_pos[i] - 0.5;
             T r = std::sqrt(x * x + y * y);
-            x_dst[i] = -y * r * 10000;
-            y_dst[i] = x * r * 10000;
-            z_dst[i] = 0;//(std::rand() - RAND_MAX / 2 ) / RAND_MAX / 2 * 500;
+            x_dst[i] = -y * 100 * r;
+            y_dst[i] = x * 100 * r;
+            z_dst[i] = (std::rand() - RAND_MAX / 2 ) / RAND_MAX / 2 * 500;
         }
 
         cudaMemcpy(_x, x_dst, n * sizeof(T), cudaMemcpyHostToDevice);
@@ -112,6 +179,8 @@ public:
 
     void plummer(int n, T a)
     {
+        std::srand(100);
+
         T *x = (T *) std::malloc(n * sizeof(T));
         T *y = (T *) std::malloc(n * sizeof(T));
         T *z = (T *) std::malloc(n * sizeof(T));
@@ -131,7 +200,7 @@ public:
 
             x[i] = std::max<T>(0.0, std::min<T>(1.0, x[i]));
             y[i] = std::max<T>(0.0, std::min<T>(1.0, y[i]));
-            z[i] = std::max<T>(0.0, std::min<T>(1.0, z[i]));
+            z[i] = std::max<T>(0.2, std::min<T>(0.8, z[i]));
         }
 
         cudaMemcpy(_x, x, n * sizeof(T), cudaMemcpyHostToDevice);

@@ -10,7 +10,8 @@
 #define GROUP_SIZE 512
 #define NUM_WARPS (GROUP_SIZE / WARP_SIZE)
 #define EPS 1e-2f
-#define GRAVITY 0.01f
+#define GRAVITY 0.001f
+#define DIST_SCALE 10.0f
 
 __device__ __forceinline__ int _warp_scan(int var, int lane_idx)
 {
@@ -74,7 +75,7 @@ void _compute_pairwise_force(T p1x, T p1y, T p1z,
                 dist_y * dist_y +
                 dist_z * dist_z;
 
-    T inv_den = dist_sq + (T) EPS;
+    T inv_den = DIST_SCALE * dist_sq + (T) EPS * EPS;
     inv_den = __frsqrt_rn(inv_den * inv_den * inv_den);
 
     dst_x += mass * (T) GRAVITY * dist_x * inv_den;
@@ -750,6 +751,10 @@ __global__ void _leapfrog_integrate_vel(SoAVec3<T> vel,
     vel.x(idx) += 0.5f * acc.x(idx) * dt;
     vel.y(idx) += 0.5f * acc.y(idx) * dt;
     vel.z(idx) += 0.5f * acc.z(idx) * dt;
+
+    vel.x(idx) *= 0.978;
+    vel.y(idx) *= 0.978;
+    vel.z(idx) *= 0.978;
 }
 
 
@@ -769,7 +774,7 @@ BarnesHut<T>::BarnesHut(SoAVec3<T> &bodies_pos,
     _vel.alloc(num_bodies);
     _acc.alloc(num_bodies);
 
-    _vel.rand(num_bodies);
+    _vel.zeros(num_bodies);
 }
 
 template<typename T>
@@ -781,7 +786,9 @@ void BarnesHut<T>::solve_pos(const Octree<T> &octree,
     static int init = 0;
     if (!init) {
         init = 1;
-        _vel.tangent(_pos, _num_bodies);
+        //_vel.tangent(_pos, _num_bodies);
+        //_vel.rand(_num_bodies);
+        //_vel.hubble(_pos, _num_bodies, 1000);
     }
 
     _acc.zeros(_num_bodies);

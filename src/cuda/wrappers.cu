@@ -122,8 +122,9 @@ namespace CUDAWrappers
 
     void Simulation::samplePoints()
     {
-        _impl->points.sample_uniform();
+        //_impl->points.sample_uniform();
         //_impl->points.sample_plummer();
+        _impl->points.sample_sphere();
         _impl->updatePoints();
         _impl->updateOctree(_params.max_num_codes_per_leaf);
     }

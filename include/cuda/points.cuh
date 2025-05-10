@@ -107,12 +107,30 @@ public:
         thrust::host_vector<T> z(_num_points);
 
         thrust::uniform_real_distribution<T> dist;
-        // thrust::normal_distribution<T> dist(0.5, 0.1);
+        //thrust::normal_distribution<T> dist(0.5, 0.1);
         auto dist_gen = [&] { return max(0.0, min(1.0, dist(_rng))); };
 
         thrust::generate(x.begin(), x.end(), dist_gen);
         thrust::generate(y.begin(), y.end(), dist_gen);
         thrust::generate(z.begin(), z.end(), dist_gen);
+
+        /*
+        for (int i = 0; i < _num_points; ++i) {
+            if (i % 3 == 0) {
+                x[i] -= 0.25;
+                y[i] -= 0.25;
+                z[i] += 0.25;
+            } else if (i % 3 == 1) {
+                x[i] -= 0.25;
+                y[i] += 0.25;
+                z[i] += 0.25;
+            } else {
+                x[i] += 0.25;
+                y[i] += 0.25;
+                z[i] -= 0.25;
+            }
+        }
+        */
 
         cudaMemcpy(_pos.x(),
                    thrust::raw_pointer_cast(&x[0]),
@@ -131,6 +149,11 @@ public:
     void sample_plummer()
     {
         _pos.plummer(_num_points, 0.2);
+    }
+
+    void sample_sphere()
+    {
+        _pos.sphere(_num_points, 0.3);
     }
 
     void compute_morton_codes()
