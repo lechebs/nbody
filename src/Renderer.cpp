@@ -17,7 +17,7 @@
 #include "ShaderProgram.hpp"
 #include "CUDAWrappers.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 14;
+constexpr unsigned int N_POINTS = 2 << 17;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -27,7 +27,7 @@ Renderer::Renderer(unsigned int window_width,
     _window_width(window_width),
     _window_height(window_height),
     _window_title("nbody"),
-    _camera(M_PI / 3,
+    _camera(M_PI / 4,
             static_cast<float>(window_width) / window_height,
             -0.01,
             -20.0) {}
@@ -42,9 +42,9 @@ void Renderer::run()
     assert(_initialized);
 
     _allocBuffers();
-    _setupScene();
+   _setupScene();
 
-    CUDAWrappers::Simulation::Params p = { N_POINTS, 32, 0.75, 0.0001 };
+    CUDAWrappers::Simulation::Params p = { N_POINTS, 64, 0.75, 0.0005 };
     CUDAWrappers::Simulation simulation(p, _particles_ssbo);
     simulation.samplePoints();
 
@@ -274,13 +274,13 @@ void Renderer::_setupScene()
     glClearColor(0.05f, 0.05f, 0.05f, 0.0f);
     // Enabling transparency
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    // glBlendFunc(GL_SRC_ALPHA, GL_ADD);
+    //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     // Enabling depth testing
     // glEnable(GL_DEPTH_TEST);
 
     //_camera.setPosition({ 0.0f, 0.0f, -1.0f });
-    _camera.setSphericalPosition({ 3.0f, 0.0f, 0.0f });
+    _camera.setSphericalPosition({ 1.0f, 0.0f, 0.0f });
     _camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
 
     _camera.setOrbitMode(true);
@@ -311,7 +311,7 @@ void Renderer::_handleEvents()
             // Zooming camera
             vec3 zoom_delta({ 0, 0, 0.1f * event.wheel.preciseY });
             // _camera.move(zoom_delta);
-            _camera.orbit({ 0.1f * event.wheel.preciseY, 0, 0 });
+            _camera.orbit({ 0.05f * event.wheel.preciseY, 0, 0 });
         } else if (event.type == SDL_KEYUP &&
                    event.key.keysym.sym == SDLK_SPACE) {
             _shader_programs[PARTICLE_SHADER].loadUniformInt(
@@ -326,13 +326,16 @@ void Renderer::_handleEvents()
     Uint32 mouse_btn_state = SDL_GetMouseState(&mouse_x, &mouse_y);
 
     // Left click
-    if (mouse_btn_state & SDL_BUTTON(1)) {
+    if (true) {//mouse_btn_state & SDL_BUTTON(1)) {
         // Normalize to canonical cube
         vec3 normalized_mouse_delta({
             2.0f / _window_width * (prev_mouse_x - mouse_x),
             2.0f / _window_height * (prev_mouse_y - mouse_y),
             0
         });
+
+        normalized_mouse_delta[0] = 0.01;
+        normalized_mouse_delta[1] = 0.0;
         // Translating camera
         // _camera.move(normalized_mouse_delta);
 
@@ -376,9 +379,11 @@ void Renderer::_renderFrame()
     glBindVertexArray(_quad_vao);
     glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, N_POINTS);
 
+    /*
     _shader_programs[CUBE_SHADER].enable();
     glBindVertexArray(_cube_vao);
     glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
+    */
 
     SDL_GL_SwapWindow(_window);
 }
