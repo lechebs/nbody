@@ -17,7 +17,7 @@
 #include "ShaderProgram.hpp"
 #include "CUDAWrappers.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 17;
+constexpr unsigned int N_POINTS = 2 << 19;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -42,9 +42,9 @@ void Renderer::run()
     assert(_initialized);
 
     _allocBuffers();
-   _setupScene();
+    _setupScene();
 
-    CUDAWrappers::Simulation::Params p = { N_POINTS, 64, 0.75, 0.0005 };
+    CUDAWrappers::Simulation::Params p = { N_POINTS, 64, 0.75, 0.00075 };
     CUDAWrappers::Simulation simulation(p, _particles_ssbo);
     simulation.samplePoints();
 
@@ -250,7 +250,8 @@ void Renderer::_allocBuffers()
     };
     */
 
-    const std::array<float, 2 * N_POINTS> dummy = {};
+    std::vector<float> dummy;
+    dummy.reserve(N_POINTS);
     // Creating Shader Storage Buffer Objects to store particles data.
     for (int i = 0; i < 5; ++i) {
         glGenBuffers(1, &_particles_ssbo[i]);
@@ -258,7 +259,7 @@ void Renderer::_allocBuffers()
         // Copying particles data to GPU memory to define size
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, _particles_ssbo[i]);
         glBufferData(GL_SHADER_STORAGE_BUFFER,
-                     sizeof(dummy),
+                     N_POINTS * sizeof(float),
                      dummy.data(),
                      GL_DYNAMIC_DRAW);
     }
@@ -280,7 +281,7 @@ void Renderer::_setupScene()
     // glEnable(GL_DEPTH_TEST);
 
     //_camera.setPosition({ 0.0f, 0.0f, -1.0f });
-    _camera.setSphericalPosition({ 1.0f, 0.0f, 0.0f });
+    _camera.setSphericalPosition({ 1.0f, 0.0f, M_PI / 2 });
     _camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
 
     _camera.setOrbitMode(true);
@@ -326,7 +327,7 @@ void Renderer::_handleEvents()
     Uint32 mouse_btn_state = SDL_GetMouseState(&mouse_x, &mouse_y);
 
     // Left click
-    if (true) {//mouse_btn_state & SDL_BUTTON(1)) {
+    if (mouse_btn_state & SDL_BUTTON(1)) {
         // Normalize to canonical cube
         vec3 normalized_mouse_delta({
             2.0f / _window_width * (prev_mouse_x - mouse_x),
@@ -334,8 +335,9 @@ void Renderer::_handleEvents()
             0
         });
 
-        normalized_mouse_delta[0] = 0.01;
-        normalized_mouse_delta[1] = 0.0;
+        //normalized_mouse_delta[0] = 0.01;
+        //normalized_mouse_delta[1] = 0.0;
+
         // Translating camera
         // _camera.move(normalized_mouse_delta);
 

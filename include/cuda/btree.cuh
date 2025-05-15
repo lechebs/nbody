@@ -64,11 +64,11 @@ public:
 
     // Generates leaf nodes such that each contain no more than
     // max_num_points_per_leaf
-    void generate_leaves(const uint32_t *d_sorted_codes,
+    void generate_leaves(const morton_t *d_sorted_codes,
                          int max_num_codes_per_leaf);
 
     // Builds the binary radix tree given the sorted morton encoded codes
-    void build(const uint32_t *d_sorted_codes);
+    void build(const morton_t *d_sorted_codes);
 
     // Sorts internal nodes by depth to allow efficient bfs traversal
     void sort_to_bfs_order();
@@ -154,6 +154,7 @@ private:
 
     // Buffers used for temporary storage
     int *_tmp;
+    morton_t *_tmp_morton;
     int *_tmp_ranges;
 
     // Data used to sort internal nodes

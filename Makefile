@@ -7,7 +7,7 @@ LDLIBS = -lGL -lGLEW -lSDL2
 INCLUDE = -Iinclude
 
 NVCC = nvcc
-NVCCFLAGS = -arch=compute_89 -code=sm_89
+NVCCFLAGS = -arch=compute_89 -code=sm_89 -maxrregcount=40
 
 EXE = main
 CUDA_OBJS = btree.o octree.o barnes_hut.o wrappers.o

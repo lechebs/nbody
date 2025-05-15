@@ -14,13 +14,13 @@
 
 // Computes the longes common prefix between
 // the bits of two unsigned integers
-__device__ __forceinline__ int _lcp_safe(const uint32_t *codes, int i, int j)
+__device__ __forceinline__ int _lcp_safe(const morton_t *codes, int i, int j)
 {
     // Does this allow coalescing?
-    return __clz(codes[i] ^ codes[j]) - 2; // Removing leading 00
+    return __clzll(codes[i] ^ codes[j]) - 1; // Removing leading 0
 }
 
-__device__ __forceinline__ int _lcp(const uint32_t *codes, int i, int j, int n)
+__device__ __forceinline__ int _lcp(const morton_t *codes, int i, int j, int n)
 {
     // i index is always in range
     if (j < 0 || j > n - 1)
@@ -34,7 +34,7 @@ __device__ __forceinline__ int _sign(int x)
     return (x > 0) - (x < 0);
 }
 
-__device__ int _find_split(const uint32_t *codes,
+__device__ int _find_split(const morton_t *codes,
                            int first,
                            int last,
                            int node_lcp,
@@ -57,7 +57,7 @@ __device__ int _find_split(const uint32_t *codes,
     return first + step * dir + min(dir, 0);
 }
 
-__device__ int _search_lr(const uint32_t *codes,
+__device__ int _search_lr(const morton_t *codes,
                           const int *leaf_depth,
                           int dir,
                           int idx,
@@ -87,7 +87,7 @@ __device__ int _search_lr(const uint32_t *codes,
     return l;
 }
 
-__device__ void _set_node_child(const uint32_t *codes,
+__device__ void _set_node_child(const morton_t *codes,
                                 SoABtreeNodes nodes,
                                 int *child,
                                 int parent_idx,
@@ -132,7 +132,7 @@ __device__ void _set_node_child(const uint32_t *codes,
 
 }
 
-__global__ void _reduce_leaf_depth(const uint32_t *codes,
+__global__ void _reduce_leaf_depth(const morton_t *codes,
                                    int *leaf_depth,
                                    const int *num_leaves)
 {
@@ -145,7 +145,7 @@ __global__ void _reduce_leaf_depth(const uint32_t *codes,
                           _lcp(codes, idx, idx + 1, *num_leaves) / 3) + 1;
 }
 
-__global__ void _merge_leaves(const uint32_t *codes,
+__global__ void _merge_leaves(const morton_t *codes,
                               const int *leaf_depth,
                               const int *leaf_first_in,
                               int *leaf_first_out,
@@ -198,7 +198,7 @@ __global__ void _merge_leaves(const uint32_t *codes,
 }
 
 // TODO: improve coalescence
-__global__ void _build_radix_tree(const uint32_t *codes,
+__global__ void _build_radix_tree(const morton_t *codes,
                                   SoABtreeNodes nodes,
                                   int *tmp_ranges,
                                   const int *num_leaves_,
@@ -396,6 +396,7 @@ Btree::Btree(int max_num_leaves) :
     // Allocating buffers to store intermediate computations
     // TODO: align inner buffers
     cudaMalloc(&_tmp, (_max_num_leaves + 1) * 3 * sizeof(int));
+    cudaMalloc(&_tmp_morton, (_max_num_leaves + 1) * 3 * sizeof(morton_t));
     cudaMalloc(&_tmp_ranges, get_max_num_nodes() * 3 * sizeof(int));
 
     // Allocating tmp arrays for cub operations
@@ -437,7 +438,7 @@ void Btree::reset_max_num_leaves()
     _max_num_leaves = _init_max_num_leaves;
 }
 
-void Btree::generate_leaves(const uint32_t *d_sorted_codes,
+void Btree::generate_leaves(const morton_t *d_sorted_codes,
                             int max_num_codes_per_leaf)
 {
     int *leaf_depth = _tmp;
@@ -474,12 +475,12 @@ void Btree::generate_leaves(const uint32_t *d_sorted_codes,
                                   _max_num_leaves + 1);
 }
 
-void Btree::build(const uint32_t *d_sorted_codes)
+void Btree::build(const morton_t *d_sorted_codes)
 {
     // WARNING: watch out when gathering values from
     // the rear of d_leaf_first_code, it should probably be
     // filled with 0
-    uint32_t *leaf_first_code = reinterpret_cast<uint32_t *>(_tmp);
+    morton_t *leaf_first_code = _tmp_morton;
 
     thrust::gather(thrust::device,
                    _leaf_first_code_idx,
@@ -607,6 +608,7 @@ Btree::~Btree()
     cudaFree(_octree_map);
 
     cudaFree(_tmp);
+    cudaFree(_tmp_morton);
     cudaFree(_tmp_ranges);
     cudaFree(_range);
 

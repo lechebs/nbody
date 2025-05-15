@@ -30,12 +30,12 @@ void main()
     */
 
     vec4 color;
-    if (false) {//is_selected > 0) {
-        color = vec4(0.1f, 0.8f, 0.1f, 1.0f);
-    } else {
+    if (is_selected > 0) {
         color = vec4(0.9f, 0.3f, 0.2f, 1.0f);
+    } else {
+        color = vec4(0.8f, 0.7f, 0.6f, 1.0f);
     }
 
     // Simple sphere shading
-    frag_color = color * vec4(1.0f, 1.0f, 1.0f, (1.0f - r) * 0.1);
+    frag_color = color * vec4(1.0f, 1.0f, 1.0f, (1.0f - r) * 0.05);
 }

@@ -4,7 +4,6 @@
 
 ## TODO
 
-- 64 bit morton
 - fit octree to bbox
 - power spectrum ic
 - janus model

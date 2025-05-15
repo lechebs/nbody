@@ -17,7 +17,7 @@
 #include <cub/device/device_partition.cuh>
 #include <cub/device/device_run_length_encode.cuh>
 
-__device__ __forceinline__ uint32_t _expand_bits(uint32_t u)
+__device__ __forceinline__ morton_t _expand_bits(morton_t u)
 {
     u = (u * 0x00010001u) & 0xFF0000FFu;
     u = (u * 0x00000101u) & 0x0F00F00Fu;
@@ -27,11 +27,22 @@ __device__ __forceinline__ uint32_t _expand_bits(uint32_t u)
     return u;
 }
 
+__device__ __forceinline__ morton_t _expand_bitsll(morton_t u)
+{
+    u &= 0x00000000001fffffu;
+    u = (u * 0x0000000100000001u) & 0x1F00000000FFFFu;
+    u = (u * 0x0000000000010001u) & 0x1F0000FF0000FFu;
+    u = (u * 0x0000000000000101u) & 0x100F00F00F00F00Fu;
+    u = (u * 0x0000000000000011u) & 0x10C30C30C30C30C3u;
+    u = (u * 0x0000000000000005u) & 0x1249249249249249u;
+    return u;
+}
+
 // Computes 30-bit morton code by interleaving the bits
 // of the coordinates, supposing that they are normalized
 // in the range [0.0, 1.0]
 template<typename T> __global__ void _morton_encode(const SoAVec3<T> pos,
-                                                    uint32_t *codes,
+                                                    morton_t *codes,
                                                     int num_points)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -40,13 +51,23 @@ template<typename T> __global__ void _morton_encode(const SoAVec3<T> pos,
     }
 
     // Scale coordinates to [0, 2^10)
-    uint32_t x = (uint32_t) (pos.x(idx) * 1023.0f);
-    uint32_t y = (uint32_t) (pos.y(idx) * 1023.0f);
-    uint32_t z = (uint32_t) (pos.z(idx) * 1023.0f);
+    /*
+    morton_t x = (morton_t) (pos.x(idx) * 1023.0f);
+    morton_t y = (morton_t) (pos.y(idx) * 1023.0f);
+    morton_t z = (morton_t) (pos.z(idx) * 1023.0f);
+    */
+    morton_t x = (morton_t) (pos.x(idx) * 2097151.0f);
+    morton_t y = (morton_t) (pos.y(idx) * 2097151.0f);
+    morton_t z = (morton_t) (pos.z(idx) * 2097151.0f);
 
+    /*
     x = _expand_bits(x);
     y = _expand_bits(y);
     z = _expand_bits(z);
+    */
+    x = _expand_bitsll(x);
+    y = _expand_bitsll(y);
+    z = _expand_bitsll(z);
 
     // Left shift x by 2 bits, y by 1 bit, then bitwise or
     codes[idx] = x * 4 + y * 2 + z;
@@ -75,7 +96,7 @@ public:
         _init(num_points);
     }
 
-    uint32_t *get_d_unique_codes_ptr()
+    morton_t *get_d_unique_codes_ptr()
     {
         return _unique_codes;
     }
@@ -154,6 +175,11 @@ public:
     void sample_sphere()
     {
         _pos.sphere(_num_points, 0.3);
+    }
+
+    void sample_disk()
+    {
+        _pos.disk(_num_points, 0.1);
     }
 
     void compute_morton_codes()
@@ -275,8 +301,8 @@ private:
         _tmp_vel.alloc(num_points);
         _tmp_acc.alloc(num_points);
 
-        cudaMalloc(&_codes, num_points * sizeof(uint32_t));
-        cudaMalloc(&_unique_codes, num_points * sizeof(uint32_t));
+        cudaMalloc(&_codes, num_points * sizeof(morton_t));
+        cudaMalloc(&_unique_codes, num_points * sizeof(morton_t));
         cudaMalloc(&_codes_occurrences, (num_points + 1) * sizeof(int));
         cudaMalloc(&_codes_first_point_idx, (num_points + 1) * sizeof(int));
 
@@ -327,8 +353,8 @@ private:
     SoAVec3<T> _tmp_vel;
     SoAVec3<T> _tmp_acc;
 
-    uint32_t *_codes;
-    uint32_t *_unique_codes;
+    morton_t *_codes;
+    morton_t *_unique_codes;
     int *_codes_occurrences;
     int *_codes_first_point_idx;
 

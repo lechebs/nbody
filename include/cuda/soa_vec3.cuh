@@ -63,11 +63,8 @@ public:
             T phi = (T) std::rand() / RAND_MAX * 2 * M_PI;
 
             x_buff[i] = 0.5 + rad * std::sin(theta) * std::cos(phi);
-                //(T) std::rand() / RAND_MAX * 0.1 - 0.05;
             y_buff[i] = 0.5 + rad * std::sin(theta) * std::sin(phi);
-                //(T) std::rand() / RAND_MAX * 0.1 - 0.05;
             z_buff[i] = 0.5 + rad * std::cos(theta);
-                //(T) std::rand() / RAND_MAX * 0.1 - 0.05;
 
         }
 
@@ -78,6 +75,32 @@ public:
         std::free(x_buff);
         std::free(y_buff);
         std::free(z_buff);
+    }
+
+    void disk(int n, float r)
+    {
+        T *x_buff = (T *) std::malloc(n * sizeof(T));
+        T *y_buff = (T *) std::malloc(n * sizeof(T));
+        T *z_buff = (T *) std::malloc(n * sizeof(T));
+
+        for (int i = 0; i < n; ++i) {
+            T rad = r * std::log(1 - (T) std::rand() / RAND_MAX);
+            T theta = (T) std::rand() / RAND_MAX * 2 * M_PI;
+
+            x_buff[i] = 0.5 + rad * std::cos(theta);
+            y_buff[i] = 0.5 + rad * std::sin(theta);
+            z_buff[i] = 0.5;
+
+        }
+
+        cudaMemcpy(_x, x_buff, n * sizeof(T), cudaMemcpyHostToDevice);
+        cudaMemcpy(_y, y_buff, n * sizeof(T), cudaMemcpyHostToDevice);
+        cudaMemcpy(_z, z_buff, n * sizeof(T), cudaMemcpyHostToDevice);
+
+        std::free(x_buff);
+        std::free(y_buff);
+        std::free(z_buff);
+
     }
 
     void swap(SoAVec3<T> &other)
@@ -142,8 +165,6 @@ public:
 
     void tangent(const SoAVec3<T> _pos, int n)
     {
-        std::srand(100);
-
         T *x_pos = (T *) std::malloc(n * sizeof(T));
         T *y_pos = (T *) std::malloc(n * sizeof(T));
         T *z_pos = (T *) std::malloc(n * sizeof(T));
@@ -160,9 +181,9 @@ public:
             T x = x_pos[i] - 0.5;
             T y = y_pos[i] - 0.5;
             T r = std::sqrt(x * x + y * y);
-            x_dst[i] = -y * 100 * r;
-            y_dst[i] = x * 100 * r;
-            z_dst[i] = (std::rand() - RAND_MAX / 2 ) / RAND_MAX / 2 * 500;
+            x_dst[i] = -y * 100;
+            y_dst[i] = x * 100;
+            z_dst[i] = 0.0;//(std::rand() - RAND_MAX / 2 ) / RAND_MAX / 2 * 500;
         }
 
         cudaMemcpy(_x, x_dst, n * sizeof(T), cudaMemcpyHostToDevice);
@@ -200,7 +221,7 @@ public:
 
             x[i] = std::max<T>(0.0, std::min<T>(1.0, x[i]));
             y[i] = std::max<T>(0.0, std::min<T>(1.0, y[i]));
-            z[i] = std::max<T>(0.2, std::min<T>(0.8, z[i]));
+            z[i] = std::max<T>(0.0, std::min<T>(1.0, z[i]));
         }
 
         cudaMemcpy(_x, x, n * sizeof(T), cudaMemcpyHostToDevice);

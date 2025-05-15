@@ -1,7 +1,9 @@
 #ifndef UTILS_CUH
 #define UTILS_CUH
 
-typedef unsigned int uint32_t;
+#include <cstdint>
+
+typedef uint64_t morton_t;
 
 constexpr int THREADS_PER_BLOCK = 32;
 // TODO: compute it such that a SM is fully utilized

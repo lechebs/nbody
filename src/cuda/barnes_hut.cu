@@ -7,12 +7,12 @@
 #include "cuda/octree.cuh"
 
 #define WARP_SIZE 32
-#define GROUP_SIZE 512
+#define GROUP_SIZE 64
 #define NUM_WARPS (GROUP_SIZE / WARP_SIZE)
 #define EPS 1e-2f
-#define GRAVITY 0.003f
-#define DIST_SCALE 100.0f
-#define VELOCITY_DAMPENING 0.98f
+#define GRAVITY 0.001f
+#define DIST_SCALE 1.0f
+#define VELOCITY_DAMPENING 0.8f
 
 // TODO: try removing inlining to reduce registers usage
 __device__ __forceinline__ int _warp_scan(int var, int lane_idx)
@@ -109,8 +109,10 @@ __device__ __forceinline__ void _append_to_queue(const int *open_buff,
 
         int queue_dst = queue_size + j + threadIdx.x;
 
-        if (queue_dst > 8192)
-        printf("%d %d\n", blockIdx.x, threadIdx.x);
+        if (queue_dst > 1024) {
+            printf("ERROR!!! Queue too small!! %d %d\n", blockIdx.x, threadIdx.x);
+            return;
+        }
 
         __syncwarp(__activemask());
 
@@ -264,17 +266,17 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 
     __shared__ unsigned int sh_leaf_mask;
 
-    //__shared__ int queue_buff[4096];
+    //__shared__ int queue_buff[1024];
 
-    queue += blockIdx.x * 8192;
-    next_queue += blockIdx.x * 8192;
+    queue += blockIdx.x * 1024;
+    next_queue += blockIdx.x * 1024;
 
     //queue = queue_buff;
     //next_queue = queue_buff + 2048;
 
     /*
     queue = &queue_buff[0];
-    next_queue = &queue_buff[4096];
+    next_queue = &queue_buff[1024];
     */
 
     int approx_buff_size = 0;
@@ -503,8 +505,9 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 // nchildren_offset = 0;
                 next_queue_size += tot_num_children;
 
-                if (next_queue_size > 8192)
+                if (next_queue_size > 1024) {
                     printf("ERROR: queue too small! %d %d\n", threadIdx.x, blockIdx.x);
+                }
 
                 //tot_queue_size += tot_num_children;
 
@@ -654,17 +657,17 @@ __device__ void _impose_boundary_conditions(T &x, T &y, T &z,
                                             T &vx, T &vy, T &vz)
 {
     if (x < 0.0f || x > 1.0f) {
-        vx *= -1.0f / 2;
+        vx *= -1.0f;
         x = max(0.0f, min(1.0f, x));
     }
 
     if (y < 0.0f || y > 1.0f) {
-        vy *= -1.0f / 2;
+        vy *= -1.0f;
         y = max(0.0f, min(1.0f, y));
     }
 
     if (z < 0.0f || z > 1.0f) {
-        vz *= -1.0f / 2;
+        vz *= -1.0f;
         z = max(0.0f, min(1.0f, z));
     }
 }
@@ -775,7 +778,7 @@ BarnesHut<T>::BarnesHut(SoAVec3<T> &bodies_pos,
     _dt(dt)
 {
     // Allocate space for traversal queues
-    cudaMalloc(&_queues, 2 * (num_bodies / GROUP_SIZE) * 8192 * sizeof(int));
+    cudaMalloc(&_queues, 2 * (num_bodies / GROUP_SIZE) * 1024 * sizeof(int));
 
     _vel.alloc(num_bodies);
     _acc.alloc(num_bodies);
@@ -840,7 +843,7 @@ void BarnesHut<T>::_compute_forces(const Octree<T> &octree,
                                  codes_first_point_idx,
                                  leaf_first_code_idx,
                                  _queues,
-                                 _queues + (_num_bodies / GROUP_SIZE) * 8192,
+                                 _queues + (_num_bodies / GROUP_SIZE) * 1024,
                                  1,
                                  _theta,
                                  num_octree_leaves,
