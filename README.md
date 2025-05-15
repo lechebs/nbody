@@ -1,6 +1,7 @@
 # CUDA Accelerated Barnes-Hut N-body
 
 ![](clusters.gif)
+![](red-clusters.gif)
 
 ## TODO
 
