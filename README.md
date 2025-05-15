@@ -1,7 +1,7 @@
-# CUDA Accelerated Barnes-Hut N-body
+# CUDA Accelerated Barnes-Hut N-Body Simulation
 
-256k and 512k bodies running in real-time on a NVIDIA RTX 500 Ada Generation Laptop.
-![](clusters.gif)
+#### 512k bodies running in real-time on a NVIDIA RTX 500 Ada Generation Laptop GPU.
+
 ![](red-clusters.gif)
 
 ## TODO
@@ -11,4 +11,3 @@
 - janus model
 - compute energy
 - compare acc error with all-pairs
-
