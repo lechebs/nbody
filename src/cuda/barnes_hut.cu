@@ -10,9 +10,11 @@
 #define GROUP_SIZE 512
 #define NUM_WARPS (GROUP_SIZE / WARP_SIZE)
 #define EPS 1e-2f
-#define GRAVITY 0.001f
-#define DIST_SCALE 10.0f
+#define GRAVITY 0.003f
+#define DIST_SCALE 100.0f
+#define VELOCITY_DAMPENING 0.98f
 
+// TODO: try removing inlining to reduce registers usage
 __device__ __forceinline__ int _warp_scan(int var, int lane_idx)
 {
     int res = var;
@@ -28,9 +30,9 @@ __device__ __forceinline__ int _warp_scan(int var, int lane_idx)
 }
 
 template<typename T> __device__ __forceinline__
-bool _approx_crit(float size, T dist, float theta)
+bool _approx_crit(float size, T dist_sq, float theta)
 {
-    return size / dist < theta;
+    return size * size / dist_sq < theta * theta;
 }
 
 template<typename T> __device__ __forceinline__
@@ -45,7 +47,7 @@ T _compute_group_to_node_min_dist(const T *x_group,
     T min_dist_sq = (T) 3.0f;
 
     #pragma unroll
-    for (int i = 0; i < WARP_SIZE; ++i) {
+    for (int i = 0; i < GROUP_SIZE; ++i) {
         // Shifting to avoid bank conflicts
         // int j = (i + threadIdx.x) % WARP_SIZE;
         T dx = x_group[i] - x_node;
@@ -58,7 +60,7 @@ T _compute_group_to_node_min_dist(const T *x_group,
         }
     }
 
-    return __fsqrt_rn(min_dist_sq);
+    return min_dist_sq;
 }
 
 template<typename T> __device__ __forceinline__
@@ -148,6 +150,7 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
 
     int chunk_size = approx_buff_size - start_buff_idx;
     // #pragma unroll
+    // TODO: try unrolling when possible
     for (int k = 0; k < chunk_size; ++k) {
         _compute_pairwise_force(px,
                                 py,
@@ -195,6 +198,7 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
 
         int chunk_size = min(k + GROUP_SIZE, leaf_num_bodies) - k;
         // #pragma unroll
+        // TODO: try unrolling when possible
         for (int b = 0; b < chunk_size; ++b) {
             _compute_pairwise_force(px,
                                     py,
@@ -352,7 +356,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 open_node = !is_leaf && !approx_node;
 
                 /*
-                if (blockIdx.x == 0) {
+                if (blockIdx.x == 10) {
                     printf("[%04d - %04d] node=%04d leaf=%d approx=%d open=%d size=%.3f "
                            "(%.3f, %.3f, %.3f) child=%d num_children=%d\n",
                            threadIdx.x, blockIdx.x, node, is_leaf, approx_node, open_node, size,
@@ -465,7 +469,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
             }
 
             /*
-            if (blockIdx.x == 0 && threadIdx.x == 31) {
+            if (blockIdx.x == 10 && (threadIdx.x == 511)) {
                 printf("approx_size=%d open_size=%d\n",
                        approx_buff_size, open_buff_size);
                 printf("approx = ");
@@ -505,7 +509,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 //tot_queue_size += tot_num_children;
 
                 /*
-                if (body_idx == 0) {
+                if (threadIdx.x == 0) {
                     printf("open = [");
                     for (int j = 0; j < next_queue_size; ++j) {
                         printf(" %d", next_queue[j]);
@@ -584,7 +588,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
             // Shouldn't be strictly needed here
             __syncthreads();
 
-            //if (body_idx == 0) printf("\n");
+            //if (threadIdx.x == 0 && blockIdx.x == 10) printf("\n");
         }
         // __syncthreads() here yes though
 
@@ -594,6 +598,8 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 
         queue_size = next_queue_size;
     }
+
+    __syncthreads();
 
     if (approx_buff_size > 0) {
         //n_approx += approx_buff_size;
@@ -752,9 +758,9 @@ __global__ void _leapfrog_integrate_vel(SoAVec3<T> vel,
     vel.y(idx) += 0.5f * acc.y(idx) * dt;
     vel.z(idx) += 0.5f * acc.z(idx) * dt;
 
-    vel.x(idx) *= 0.978;
-    vel.y(idx) *= 0.978;
-    vel.z(idx) *= 0.978;
+    vel.x(idx) *= VELOCITY_DAMPENING;
+    vel.y(idx) *= VELOCITY_DAMPENING;
+    vel.z(idx) *= VELOCITY_DAMPENING;
 }
 
 
