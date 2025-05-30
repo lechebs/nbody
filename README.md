@@ -4,6 +4,10 @@
 
 ![](red-clusters.gif)
 
+#### 1mln bodies
+
+![](1mln-clusters.png)
+
 ## TODO
 
 - fit octree to bbox
@@ -11,3 +15,4 @@
 - janus model
 - compute energy
 - compare acc error with all-pairs
+- revert to 32 sized groups when traversing (apparently faster)
