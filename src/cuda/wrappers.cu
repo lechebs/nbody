@@ -16,7 +16,7 @@ namespace CUDAWrappers
             points(num_points),
             btree(num_points),
             octree(num_points),
-            bh(points.get_d_pos(), num_points, theta, dt) {}
+            bh(points.get_d_pos(), num_points, theta, dt, 5000) {}
 
         Impl(int num_points, float theta, float dt, void *mapped_ptrs[5]) :
             points(num_points,
@@ -27,7 +27,7 @@ namespace CUDAWrappers
             octree(num_points,
                    static_cast<int *>(mapped_ptrs[3]),
                    static_cast<int *>(mapped_ptrs[4])),
-            bh(points.get_d_pos(), num_points, theta, dt) {}
+            bh(points.get_d_pos(), num_points, theta, dt, 0) {}
 
         void updatePoints()
         {
@@ -46,13 +46,13 @@ namespace CUDAWrappers
                                   max_num_codes_per_leaf);
             _num_leaves = btree.get_num_leaves();
             btree.set_max_num_leaves(_num_leaves);
-            std::cout << "num_leaves=" << _num_leaves << std::endl;
+            //std::cout << "num_leaves=" << _num_leaves << std::endl;
 
             btree.build(points.get_d_unique_codes_ptr());
             btree.sort_to_bfs_order();
             btree.compute_octree_map();
 
-            // btree.print();
+            //btree.print();
 
             octree.set_max_num_nodes(btree.get_max_num_nodes());
             octree.build(btree);
@@ -125,6 +125,8 @@ namespace CUDAWrappers
         //_impl->points.sample_uniform();
         //_impl->points.sample_plummer();
         _impl->points.sample_sphere();
+        //_impl->points.sample_disk();
+
         _impl->updatePoints();
         _impl->updateOctree(_params.max_num_codes_per_leaf);
     }
@@ -151,7 +153,7 @@ namespace CUDAWrappers
         float ms;
         cudaEventElapsedTime(&ms, start, stop);
 
-        std::cout << "elapsed=" << ms << std::endl;
+        //std::cout << "elapsed=" << ms << std::endl;
     }
 
     Simulation::~Simulation() {}

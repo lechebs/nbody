@@ -2,17 +2,19 @@
 
 #include <cassert>
 
+#include <cub/device/device_reduce.cuh>
+
 #include "cuda/soa_vec3.cuh"
 #include "cuda/soa_octree_nodes.cuh"
 #include "cuda/octree.cuh"
 
 #define WARP_SIZE 32
-#define GROUP_SIZE 64
+#define GROUP_SIZE 32
 #define NUM_WARPS (GROUP_SIZE / WARP_SIZE)
-#define EPS 1e-2f
-#define GRAVITY 0.001f
+#define EPS 1e-1f
+#define GRAVITY 0.01f
 #define DIST_SCALE 1.0f
-#define VELOCITY_DAMPENING 0.8f
+#define VELOCITY_DAMPENING 1.0f
 
 // TODO: try removing inlining to reduce registers usage
 __device__ __forceinline__ int _warp_scan(int var, int lane_idx)
@@ -109,7 +111,7 @@ __device__ __forceinline__ void _append_to_queue(const int *open_buff,
 
         int queue_dst = queue_size + j + threadIdx.x;
 
-        if (queue_dst > 1024) {
+        if (queue_dst > 8192) {
             printf("ERROR!!! Queue too small!! %d %d\n", blockIdx.x, threadIdx.x);
             return;
         }
@@ -182,7 +184,8 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
                     T pz,
                     T &fx,
                     T &fy,
-                    T &fz)
+                    T &fz,
+                    int &n_p2p)
 {
     int leaf_first_body = bodies_begin[leaf];
     int leaf_num_bodies = bodies_end[leaf] - leaf_first_body + 1;
@@ -202,6 +205,7 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
         // #pragma unroll
         // TODO: try unrolling when possible
         for (int b = 0; b < chunk_size; ++b) {
+            n_p2p++;
             _compute_pairwise_force(px,
                                     py,
                                     pz,
@@ -268,8 +272,8 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 
     //__shared__ int queue_buff[1024];
 
-    queue += blockIdx.x * 1024;
-    next_queue += blockIdx.x * 1024;
+    queue += blockIdx.x * 8192;
+    next_queue += blockIdx.x * 8192;
 
     //queue = queue_buff;
     //next_queue = queue_buff + 2048;
@@ -292,9 +296,11 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     // Nevertheless, when forces need to be evaluated,
     // all points covered by the codes are considered.
 
-    //int n_opened = 0;
-    //int n_approx = 0;
-    //int n_leaves = 0;
+    int n_opened = 0;
+    int n_approx = 0;
+    int n_leaves = 0;
+
+    int n_p2p = 0;
 
     int lane_idx = threadIdx.x % WARP_SIZE;
     int warp_idx = threadIdx.x / WARP_SIZE;
@@ -490,7 +496,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
             // TODO: try to evaluate when open_buff_size > 4, or more
             // e.g. when open_buff_size > 32
             if (open_buff_size > 0) {
-                //n_opened += open_buff_size;
+                n_opened += open_buff_size;
 
                 _append_to_queue(open_buff,
                                  nchildren_buff,
@@ -505,7 +511,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 // nchildren_offset = 0;
                 next_queue_size += tot_num_children;
 
-                if (next_queue_size > 1024) {
+                if (next_queue_size > 8192) {
                     printf("ERROR: queue too small! %d %d\n", threadIdx.x, blockIdx.x);
                 }
 
@@ -562,15 +568,16 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                    pz,
                                    fx,
                                    fy,
-                                   fz);
+                                   fz,
+                                   n_p2p);
                     n++;
-                    //n_leaves++;
+                    n_leaves++;
                 }
             }
 
             // Evaluate cluster interaction list
             if (approx_buff_size >= GROUP_SIZE) {
-                //n_approx += GROUP_SIZE;
+                n_approx += GROUP_SIZE;
                 approx_buff_size = _evaluate_approx(bodies_pos,
                                                     nodes_barycenter,
                                                     bodies_begin,
@@ -605,7 +612,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     __syncthreads();
 
     if (approx_buff_size > 0) {
-        //n_approx += approx_buff_size;
+        n_approx += approx_buff_size;
         approx_buff_size = _evaluate_approx(bodies_pos,
                                             nodes_barycenter,
                                             bodies_begin,
@@ -645,11 +652,43 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
         printf("%d, %d\n", tot_queue_size, leaves_eval);
         */
 
+    //printf("opened=%d, approx=%d, leaves=%d\n", n_opened, n_approx, n_leaves);
+
     /*
-    if (body_idx == 0) {
-        printf("opened=%d, approx=%d, leaves=%d\n", n_opened, n_approx, n_leaves);
+    if (n_p2p != num_bodies) {
+        printf("WARNING: %d %d %d\n", blockIdx.x, threadIdx.x, n_p2p);
     }
     */
+}
+
+template<typename T>
+__global__ void _compute_all_pairs_forces(const SoAVec3<T> pos,
+                                          SoAVec3<T> acc,
+                                          int num_bodies)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= num_bodies) {
+        return;
+    }
+
+    T p1x = pos.x(idx);
+    T p1y = pos.y(idx);
+    T p1z = pos.z(idx);
+
+    T fx = (T) 0.0f;
+    T fy = (T) 0.0f;
+    T fz = (T) 0.0f;
+
+    for (int i = 0; i < num_bodies; ++i) {
+        _compute_pairwise_force(p1x, p1y, p1z,
+                                pos.x(i), pos.y(i), pos.z(i),
+                                (T) 1.0f,
+                                fx, fy, fz);
+    }
+
+    acc.x(idx) += fx;
+    acc.y(idx) += fy;
+    acc.z(idx) += fz;
 }
 
 template<typename T>
@@ -766,19 +805,85 @@ __global__ void _leapfrog_integrate_vel(SoAVec3<T> vel,
     vel.z(idx) *= VELOCITY_DAMPENING;
 }
 
+template<typename T>
+__global__ void _compute_bodies_energy(const SoAVec3<T> pos,
+                                       const SoAVec3<T> vel,
+                                       T *energy,
+                                       const T *tot_energy,
+                                       int num_bodies)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= num_bodies) {
+        return;
+    }
+
+    T vx = vel.x(idx);
+    T vy = vel.y(idx);
+    T vz = vel.z(idx);
+
+    // Kinetic energy
+    T e = 0.5 * (vx * vx + vy * vy + vz * vz);
+
+    T p1x = pos.x(idx);
+    T p1y = pos.y(idx);
+    T p1z = pos.z(idx);
+
+    // Potential energy
+    for (int i = 0; i < num_bodies; ++i) {
+        if (i != idx) {
+            T p2x = pos.x(i);
+            T p2y = pos.y(i);
+            T p2z = pos.z(i);
+
+            T dist_x = p1x - p2x;
+            T dist_y = p1y - p2y;
+            T dist_z = p1z - p2z;
+
+            e -= 0.5 * GRAVITY * __frsqrt_rn(dist_x * dist_x +
+                                             dist_y * dist_y +
+                                             dist_z * dist_z);
+        }
+    }
+
+    energy[idx] = e;
+
+    if (idx == 0) {
+       printf("%f\n", tot_energy[0]);
+    }
+
+}
 
 template<typename T>
 BarnesHut<T>::BarnesHut(SoAVec3<T> &bodies_pos,
                         int num_bodies,
                         float theta,
-                        float dt) :
+                        float dt,
+                        int compute_energy_max_steps) :
     _pos(bodies_pos),
     _num_bodies(num_bodies),
     _theta(theta),
-    _dt(dt)
+    _dt(dt),
+    _curr_step(0),
+    _compute_energy_max_steps(compute_energy_max_steps)
 {
     // Allocate space for traversal queues
-    cudaMalloc(&_queues, 2 * (num_bodies / GROUP_SIZE) * 1024 * sizeof(int));
+    cudaMalloc(&_queues, 2 * (num_bodies / GROUP_SIZE) * 8192 * sizeof(int));
+
+    std::cout << compute_energy_max_steps << std::endl;
+    // Allocate space for energy computation
+    if (compute_energy_max_steps > 0) {
+        cudaMalloc(&_tmp_energy, num_bodies * sizeof(T));
+
+        _tmp_reduce = nullptr;
+        cub::DeviceReduce::Sum(_tmp_reduce,
+                               _tmp_reduce_size,
+                               _tmp_energy,
+                               _total_energy,
+                               num_bodies);
+        cudaMalloc(&_tmp_reduce, _tmp_reduce_size);
+
+        cudaMalloc(&_total_energy, compute_energy_max_steps * sizeof(T));
+    }
 
     _vel.alloc(num_bodies);
     _acc.alloc(num_bodies);
@@ -822,8 +927,29 @@ void BarnesHut<T>::solve_vel(const Octree<T> &octree,
                     num_octree_leaves);
 
     _update_vel();
+
+    if (_curr_step < _compute_energy_max_steps) {
+        _compute_energy();
+        ++_curr_step;
+    }
 }
 
+template<typename T>
+void BarnesHut<T>::_compute_energy()
+{
+    _compute_bodies_energy<<<_num_bodies / MAX_THREADS_PER_BLOCK +
+                            (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
+                            MAX_THREADS_PER_BLOCK>>>(_pos,
+                                                     _vel,
+                                                     _tmp_energy,
+                                                     _total_energy + _curr_step - (_curr_step > 0 ? 1 : 0),
+                                                     _num_bodies);
+    cub::DeviceReduce::Sum(_tmp_reduce,
+                           _tmp_reduce_size,
+                           _tmp_energy,
+                           _total_energy + _curr_step,
+                           _num_bodies);
+}
 
 template<typename T>
 void BarnesHut<T>::_compute_forces(const Octree<T> &octree,
@@ -834,7 +960,7 @@ void BarnesHut<T>::_compute_forces(const Octree<T> &octree,
     _barnes_hut_traverse<<<_num_bodies / GROUP_SIZE +
                            (_num_bodies % GROUP_SIZE > 0),
                            GROUP_SIZE>>>
-        /*num_octree_leaves, 32>>>*/(_pos,
+                                (_pos,
                                  _acc,
                                  octree.get_d_nodes(),
                                  octree.get_d_barycenters(),
@@ -843,11 +969,19 @@ void BarnesHut<T>::_compute_forces(const Octree<T> &octree,
                                  codes_first_point_idx,
                                  leaf_first_code_idx,
                                  _queues,
-                                 _queues + (_num_bodies / GROUP_SIZE) * 1024,
+                                 _queues + (_num_bodies / GROUP_SIZE) * 8192,
                                  1,
                                  _theta,
                                  num_octree_leaves,
                                  _num_bodies);
+
+    /*
+    _compute_all_pairs_forces<<<_num_bodies / MAX_THREADS_PER_BLOCK +
+                                (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
+                                MAX_THREADS_PER_BLOCK>>>(_pos,
+                                                         _acc,
+                                                         _num_bodies);
+    */
 }
 
 template<typename T>
@@ -876,6 +1010,11 @@ void BarnesHut<T>::_update_vel()
 template<typename T>
 BarnesHut<T>::~BarnesHut()
 {
+    if (_compute_energy_max_steps > 0) {
+        cudaFree(_tmp_energy);
+        cudaFree(_tmp_reduce);
+        cudaFree(_total_energy);
+    }
     cudaFree(_queues);
 }
 
