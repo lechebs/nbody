@@ -57,8 +57,6 @@ namespace
                                                          az_ap * az_ap);
     }
 
-    // Fused kernel to step all-pairs reference implementation
-    // and compute both system's conserved quantities
     template<typename T> __global__ void
     compute_conserved_quantities(const SoAVec3<T> pos,
                                  const SoAVec3<T> vel,
@@ -172,6 +170,8 @@ Validator<T>::Validator(const SoAVec3<T> &pos,
     vel_ap_.alloc(num_bodies);
     vel_half_ap_.alloc(num_bodies);
     acc_ap_.alloc(num_bodies);
+    tmp_pos_ap_.alloc(num_bodies);
+    tmp_vel_ap_.alloc(num_bodies);
     tmp_acc_ap_.alloc(num_bodies);
 
     cudaMalloc(&energy_, num_bodies * sizeof(T));
@@ -206,9 +206,16 @@ void Validator<T>::update_all_pairs()
 {
     int num_blocks = (num_bodies_ - 1) / MAX_THREADS_PER_BLOCK + 1;
 
+    tmp_pos_ap_.gather(pos_ap_, sort_indices_, num_bodies_);
+    tmp_vel_ap_.gather(vel_ap_, sort_indices_, num_bodies_);
     tmp_acc_ap_.gather(acc_ap_, sort_indices_, num_bodies_);
+
+    pos_ap_.swap(tmp_pos_ap_);
+    vel_ap_.swap(tmp_vel_ap_);
+    acc_ap_.swap(tmp_acc_ap_);
+
     compute_acc_error<<<num_blocks, MAX_THREADS_PER_BLOCK>>>(acc_,
-                                                             tmp_acc_ap_,
+                                                             acc_ap_,
                                                              acc_err_,
                                                              num_bodies_);
     cub::DeviceReduce::Sum(tmp_reduce_,
@@ -304,6 +311,8 @@ Validator<T>::~Validator()
     vel_ap_.free();
     vel_half_ap_.free();
     acc_ap_.free();
+    tmp_pos_ap_.free();
+    tmp_vel_ap_.free();
     tmp_acc_ap_.free();
 
     cudaFree(energy_);

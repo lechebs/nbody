@@ -4,9 +4,10 @@
 #include "cuda/soa_vec3.cuh"
 
 // TODO: place in constant memory
-#define GRAVITY 0.01f
-#define SOFTENING_FACTOR 1e-1f
-#define VELOCITY_DAMPENING 0.0f
+#define GRAVITY 0.001f
+#define SOFTENING_FACTOR 1e-3f
+#define VELOCITY_DAMPENING (1.0f - 0.8236f)
+//#define VELOCITY_DAMPENING (1.0f - 0.8136f) for 2mln
 #define DIST_SCALE 1.0f
 
 namespace

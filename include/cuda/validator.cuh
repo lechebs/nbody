@@ -31,6 +31,8 @@ private:
     SoAVec3<T> vel_ap_;
     SoAVec3<T> vel_half_ap_;
     SoAVec3<T> acc_ap_;
+    SoAVec3<T> tmp_pos_ap_;
+    SoAVec3<T> tmp_vel_ap_;
     SoAVec3<T> tmp_acc_ap_;
 
     const int *sort_indices_;

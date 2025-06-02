@@ -25,6 +25,7 @@
 - r: 0.3 (spherical)
 - friction: 0.8805f
 
+OLD
 - n: 2 << 19
 - eps: 1e-3f
 - g: 0.001f
@@ -36,3 +37,16 @@
 - particle_radius: 0.001
 - particle_alpha_mult: 0.2
 - camera_fovy: pi/2
+NEW:
+- n: 2 << 19
+- eps: 1e-3f
+- g: 0.001f
+- dist_scale: 1.0f
+- dt: 0.0003
+- theta: 0.65
+- r: 0.3 (spherical)
+- friction: 1.0f - 0.8236f
+- particle_radius: 0.001
+- particle_alpha_mult: 0.2
+- camera_fovy: pi/2
+
