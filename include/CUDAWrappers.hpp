@@ -4,6 +4,7 @@
 #include <GL/glew.h>
 
 #include <memory>
+#include <string>
 
 namespace CUDAWrappers
 {
@@ -23,6 +24,7 @@ namespace CUDAWrappers
         Simulation(Params &params, GLuint buffers[5]);
         void samplePoints();
         void update();
+        void writeHistory(const std::string &csv_file_path);
         ~Simulation();
 
     private:

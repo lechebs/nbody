@@ -121,6 +121,11 @@ public:
         return _scan_pos;
     }
 
+    const int *get_d_sort_indices_ptr() const
+    {
+        return _range;
+    }
+
     void sample_uniform()
     {
         thrust::host_vector<T> x(_num_points);
@@ -189,7 +194,7 @@ public:
                          MAX_THREADS_PER_BLOCK>>>(_pos, _codes, _num_points);
     }
 
-    void sort_by_codes(SoAVec3<T> &vel, SoAVec3<T> &acc)
+    void sort_by_codes(SoAVec3<T> &vel, SoAVec3<T> &vel_half, SoAVec3<T> &acc)
     {
         thrust::sequence(thrust::device, _range, _range + _num_points);
 
@@ -203,6 +208,7 @@ public:
 
         _tmp_pos.gather(_pos, _range, _num_points);
         _tmp_vel.gather(vel, _range, _num_points);
+        _tmp_vel_half.gather(vel_half, _range, _num_points);
         _tmp_acc.gather(acc, _range, _num_points);
 
         if (_gl_buffers) {
@@ -225,6 +231,7 @@ public:
         }
 
         vel.swap(_tmp_vel);
+        vel_half.swap(_tmp_vel_half);
         acc.swap(_tmp_acc);
     }
 
@@ -279,6 +286,7 @@ public:
         _tmp_pos.free();
         _scan_pos.free();
         _tmp_vel.free();
+        _tmp_vel_half.free();
         _tmp_acc.free();
 
         cudaFree(_codes);
@@ -299,6 +307,7 @@ private:
         _tmp_pos.alloc(num_points);
         _scan_pos.alloc(num_points);
         _tmp_vel.alloc(num_points);
+        _tmp_vel_half.alloc(num_points);
         _tmp_acc.alloc(num_points);
 
         cudaMalloc(&_codes, num_points * sizeof(morton_t));
@@ -351,6 +360,7 @@ private:
     SoAVec3<T> _tmp_pos;
     SoAVec3<T> _scan_pos;
     SoAVec3<T> _tmp_vel;
+    SoAVec3<T> _tmp_vel_half;
     SoAVec3<T> _tmp_acc;
 
     morton_t *_codes;

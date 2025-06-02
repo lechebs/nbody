@@ -17,17 +17,19 @@
 #include "ShaderProgram.hpp"
 #include "CUDAWrappers.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 19;
+constexpr unsigned int N_POINTS = 2 << 15;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
+
+static bool paused = false;
 
 Renderer::Renderer(unsigned int window_width,
                    unsigned int window_height) :
     _window_width(window_width),
     _window_height(window_height),
     _window_title("nbody"),
-    _camera(M_PI / 4,
+    _camera(M_PI / 3,
             static_cast<float>(window_width) / window_height,
             -0.01,
             -20.0) {}
@@ -44,7 +46,7 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    CUDAWrappers::Simulation::Params p = { N_POINTS, 64, 0.75, 0.00075 };
+    CUDAWrappers::Simulation::Params p = { N_POINTS, 32, 0.8, 0.0001 };
     CUDAWrappers::Simulation simulation(p, _particles_ssbo);
     simulation.samplePoints();
 
@@ -52,11 +54,15 @@ void Renderer::run()
         _handleEvents();
         _updateDeltaTime();
 
-        simulation.update();
+        if (!paused) {
+            simulation.update();
+        }
 
         _updateCamera();
         _renderFrame();
     }
+
+    simulation.writeHistory("output.csv");
 }
 
 void Renderer::quit()
@@ -312,11 +318,14 @@ void Renderer::_handleEvents()
             // Zooming camera
             vec3 zoom_delta({ 0, 0, 0.1f * event.wheel.preciseY });
             // _camera.move(zoom_delta);
-            _camera.orbit({ 0.05f * event.wheel.preciseY, 0, 0 });
+            _camera.orbit({ 0.005f * event.wheel.preciseY, 0, 0 });
         } else if (event.type == SDL_KEYUP &&
                    event.key.keysym.sym == SDLK_SPACE) {
+            paused = !paused;
+            /*
             _shader_programs[PARTICLE_SHADER].loadUniformInt(
                 "selected_octree_node", ++curr_node);
+            */
         }
     }
 
@@ -335,16 +344,18 @@ void Renderer::_handleEvents()
             0
         });
 
-        //normalized_mouse_delta[0] = 0.01;
+        //normalized_mouse_delta[0] = -0.03;
         //normalized_mouse_delta[1] = 0.0;
 
         // Translating camera
         // _camera.move(normalized_mouse_delta);
 
-        _camera.orbit({
-            0, normalized_mouse_delta[1], normalized_mouse_delta[0] });
-        _camera.update(0.0);
-        _camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
+        if (true) {//!paused) {
+            _camera.orbit({
+                0, normalized_mouse_delta[1], normalized_mouse_delta[0] });
+            _camera.update(0.0);
+            _camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
+        }
     }
 
     prev_mouse_x = mouse_x;
@@ -381,11 +392,9 @@ void Renderer::_renderFrame()
     glBindVertexArray(_quad_vao);
     glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, N_POINTS);
 
-    /*
     _shader_programs[CUBE_SHADER].enable();
     glBindVertexArray(_cube_vao);
     glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
-    */
 
     SDL_GL_SwapWindow(_window);
 }

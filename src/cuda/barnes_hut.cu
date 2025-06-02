@@ -2,19 +2,15 @@
 
 #include <cassert>
 
-#include <cub/device/device_reduce.cuh>
-
 #include "cuda/soa_vec3.cuh"
 #include "cuda/soa_octree_nodes.cuh"
+#include "cuda/physics_common.cuh"
 #include "cuda/octree.cuh"
 
 #define WARP_SIZE 32
 #define GROUP_SIZE 32
 #define NUM_WARPS (GROUP_SIZE / WARP_SIZE)
-#define EPS 1e-1f
-#define GRAVITY 0.01f
-#define DIST_SCALE 1.0f
-#define VELOCITY_DAMPENING 1.0f
+#define QUEUE_SIZE 8192
 
 // TODO: try removing inlining to reduce registers usage
 __device__ __forceinline__ int _warp_scan(int var, int lane_idx)
@@ -50,41 +46,15 @@ T _compute_group_to_node_min_dist(const T *x_group,
 
     #pragma unroll
     for (int i = 0; i < GROUP_SIZE; ++i) {
-        // Shifting to avoid bank conflicts
-        // int j = (i + threadIdx.x) % WARP_SIZE;
-        T dx = x_group[i] - x_node;
-        T dy = y_group[i] - y_node;
-        T dz = z_group[i] - z_node;
+        T dist_sq = compute_dist_sq(x_group[i], y_group[i], z_group[i],
+                                    x_node, y_node, z_node);
 
-        T dist_sq = dx * dx + dy * dy + dz * dz;
         if (dist_sq <= min_dist_sq) {
             min_dist_sq = dist_sq;
         }
     }
 
     return min_dist_sq;
-}
-
-template<typename T> __device__ __forceinline__
-void _compute_pairwise_force(T p1x, T p1y, T p1z,
-                             T p2x, T p2y, T p2z,
-                             T mass,
-                             T &dst_x, T &dst_y, T &dst_z)
-{
-    T dist_x = p2x - p1x;
-    T dist_y = p2y - p1y;
-    T dist_z = p2z - p1z;
-
-    T dist_sq = dist_x * dist_x +
-                dist_y * dist_y +
-                dist_z * dist_z;
-
-    T inv_den = DIST_SCALE * dist_sq + (T) EPS * EPS;
-    inv_den = __frsqrt_rn(inv_den * inv_den * inv_den);
-
-    dst_x += mass * (T) GRAVITY * dist_x * inv_den;
-    dst_y += mass * (T) GRAVITY * dist_y * inv_den;
-    dst_z += mass * (T) GRAVITY * dist_z * inv_den;
 }
 
 __device__ __forceinline__ void _append_to_queue(const int *open_buff,
@@ -111,7 +81,7 @@ __device__ __forceinline__ void _append_to_queue(const int *open_buff,
 
         int queue_dst = queue_size + j + threadIdx.x;
 
-        if (queue_dst > 8192) {
+        if (queue_dst > QUEUE_SIZE) {
             printf("ERROR!!! Queue too small!! %d %d\n", blockIdx.x, threadIdx.x);
             return;
         }
@@ -154,18 +124,18 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
 
     int chunk_size = approx_buff_size - start_buff_idx;
     // #pragma unroll
-    // TODO: try unrolling when possible
+    // TODO: try unrolling
     for (int k = 0; k < chunk_size; ++k) {
-        _compute_pairwise_force(px,
-                                py,
-                                pz,
-                                x_buff[k],
-                                y_buff[k],
-                                z_buff[k],
-                                (T) approx_buff[start_buff_idx + k],
-                                fx,
-                                fy,
-                                fz);
+        accumulate_pairwise_force(px,
+                                  py,
+                                  pz,
+                                  x_buff[k],
+                                  y_buff[k],
+                                  z_buff[k],
+                                  (T) approx_buff[start_buff_idx + k],
+                                  fx,
+                                  fy,
+                                  fz);
     }
 
     return start_buff_idx;
@@ -206,16 +176,16 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
         // TODO: try unrolling when possible
         for (int b = 0; b < chunk_size; ++b) {
             n_p2p++;
-            _compute_pairwise_force(px,
-                                    py,
-                                    pz,
-                                    x_buff[b],
-                                    y_buff[b],
-                                    z_buff[b],
-                                    (T) 1.0,
-                                    fx,
-                                    fy,
-                                    fz);
+            accumulate_pairwise_force(px,
+                                      py,
+                                      pz,
+                                      x_buff[b],
+                                      y_buff[b],
+                                      z_buff[b],
+                                      (T) 1.0,
+                                      fx,
+                                      fy,
+                                      fz);
         }
     }
 }
@@ -270,18 +240,8 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 
     __shared__ unsigned int sh_leaf_mask;
 
-    //__shared__ int queue_buff[1024];
-
-    queue += blockIdx.x * 8192;
-    next_queue += blockIdx.x * 8192;
-
-    //queue = queue_buff;
-    //next_queue = queue_buff + 2048;
-
-    /*
-    queue = &queue_buff[0];
-    next_queue = &queue_buff[1024];
-    */
+    queue += blockIdx.x * QUEUE_SIZE;
+    next_queue += blockIdx.x * QUEUE_SIZE;
 
     int approx_buff_size = 0;
     int open_buff_size = 0;
@@ -511,7 +471,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 // nchildren_offset = 0;
                 next_queue_size += tot_num_children;
 
-                if (next_queue_size > 8192) {
+                if (next_queue_size > QUEUE_SIZE) {
                     printf("ERROR: queue too small! %d %d\n", threadIdx.x, blockIdx.x);
                 }
 
@@ -630,22 +590,9 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                             approx_buff_size);
     }
 
-    /*
-    _compute_pairwise_force(px,
-                            py,
-                            pz,
-                            (T) 0.5f,
-                            (T) 0.5f,
-                            (T) 0.5f,
-                            (T) 100000.0f,
-                            fx,
-                            fy,
-                            fz);
-    */
-
-    bodies_acc.x(body_idx) += fx;
-    bodies_acc.y(body_idx) += fy;
-    bodies_acc.z(body_idx) += fz;
+    bodies_acc.x(body_idx) = fx;
+    bodies_acc.y(body_idx) = fy;
+    bodies_acc.z(body_idx) = fz;
 
     /*
     if (blockIdx.x < 10 && threadIdx.x == 0)
@@ -662,233 +609,24 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 }
 
 template<typename T>
-__global__ void _compute_all_pairs_forces(const SoAVec3<T> pos,
-                                          SoAVec3<T> acc,
-                                          int num_bodies)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= num_bodies) {
-        return;
-    }
-
-    T p1x = pos.x(idx);
-    T p1y = pos.y(idx);
-    T p1z = pos.z(idx);
-
-    T fx = (T) 0.0f;
-    T fy = (T) 0.0f;
-    T fz = (T) 0.0f;
-
-    for (int i = 0; i < num_bodies; ++i) {
-        _compute_pairwise_force(p1x, p1y, p1z,
-                                pos.x(i), pos.y(i), pos.z(i),
-                                (T) 1.0f,
-                                fx, fy, fz);
-    }
-
-    acc.x(idx) += fx;
-    acc.y(idx) += fy;
-    acc.z(idx) += fz;
-}
-
-template<typename T>
-__device__ void _impose_boundary_conditions(T &x, T &y, T &z,
-                                            T &vx, T &vy, T &vz)
-{
-    if (x < 0.0f || x > 1.0f) {
-        vx *= -1.0f;
-        x = max(0.0f, min(1.0f, x));
-    }
-
-    if (y < 0.0f || y > 1.0f) {
-        vy *= -1.0f;
-        y = max(0.0f, min(1.0f, y));
-    }
-
-    if (z < 0.0f || z > 1.0f) {
-        vz *= -1.0f;
-        z = max(0.0f, min(1.0f, z));
-    }
-}
-
-template<typename T>
-__global__ void _semi_implicit_euler_integrate(SoAVec3<T> bodies_pos,
-                                               SoAVec3<T> bodies_vel,
-                                               const SoAVec3<T> bodies_acc,
-                                               T dt,
-                                               int num_bodies)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= num_bodies) {
-        return;
-    }
-
-    T x = bodies_pos.x(idx);
-    T y = bodies_pos.y(idx);
-    T z = bodies_pos.z(idx);
-
-    T vx = bodies_vel.x(idx);
-    T vy = bodies_vel.y(idx);
-    T vz = bodies_vel.z(idx);
-
-    bodies_vel.x(idx) = vx + bodies_acc.x(idx) * dt;
-    bodies_vel.y(idx) = vy + bodies_acc.y(idx) * dt;
-    bodies_vel.z(idx) = vz + bodies_acc.z(idx) * dt;
-
-    x += vx * dt;
-    y += vy * dt;
-    z += vz * dt;
-
-    _impose_boundary_conditions(x, y, z, vx, vy, vz);
-
-    bodies_pos.x(idx) = x;
-    bodies_pos.y(idx) = y;
-    bodies_pos.z(idx) = z;
-
-    bodies_vel.x(idx) = vx;
-    bodies_vel.y(idx) = vy;
-    bodies_pos.z(idx) = vz;
-}
-
-template<typename T>
-__global__ void _leapfrog_integrate_pos(SoAVec3<T> pos,
-                                        SoAVec3<T> vel,
-                                        const SoAVec3<T> acc,
-                                        float dt,
-                                        int num_bodies)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= num_bodies) {
-        return;
-    }
-
-    T x = pos.x(idx);
-    T y = pos.y(idx);
-    T z = pos.z(idx);
-
-    T vx = vel.x(idx);
-    T vy = vel.y(idx);
-    T vz = vel.z(idx);
-
-    x += vx * dt + 0.5f * acc.x(idx) * dt * dt;
-    y += vy * dt + 0.5f * acc.y(idx) * dt * dt;
-    z += vz * dt + 0.5f * acc.z(idx) * dt * dt;
-
-    _impose_boundary_conditions(x, y, z, vx, vy, vz);
-
-    pos.x(idx) = x;
-    pos.y(idx) = y;
-    pos.z(idx) = z;
-
-    vel.x(idx) = vx;
-    vel.y(idx) = vy;
-    vel.z(idx) = vz;
-}
-
-template<typename T>
-__global__ void _leapfrog_integrate_vel(SoAVec3<T> vel,
-                                        const SoAVec3<T> acc,
-                                        float dt,
-                                        int num_bodies)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= num_bodies) {
-        return;
-    }
-
-    vel.x(idx) += 0.5f * acc.x(idx) * dt;
-    vel.y(idx) += 0.5f * acc.y(idx) * dt;
-    vel.z(idx) += 0.5f * acc.z(idx) * dt;
-
-    vel.x(idx) *= VELOCITY_DAMPENING;
-    vel.y(idx) *= VELOCITY_DAMPENING;
-    vel.z(idx) *= VELOCITY_DAMPENING;
-}
-
-template<typename T>
-__global__ void _compute_bodies_energy(const SoAVec3<T> pos,
-                                       const SoAVec3<T> vel,
-                                       T *energy,
-                                       const T *tot_energy,
-                                       int num_bodies)
-{
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= num_bodies) {
-        return;
-    }
-
-    T vx = vel.x(idx);
-    T vy = vel.y(idx);
-    T vz = vel.z(idx);
-
-    // Kinetic energy
-    T e = 0.5 * (vx * vx + vy * vy + vz * vz);
-
-    T p1x = pos.x(idx);
-    T p1y = pos.y(idx);
-    T p1z = pos.z(idx);
-
-    // Potential energy
-    for (int i = 0; i < num_bodies; ++i) {
-        if (i != idx) {
-            T p2x = pos.x(i);
-            T p2y = pos.y(i);
-            T p2z = pos.z(i);
-
-            T dist_x = p1x - p2x;
-            T dist_y = p1y - p2y;
-            T dist_z = p1z - p2z;
-
-            e -= 0.5 * GRAVITY * __frsqrt_rn(dist_x * dist_x +
-                                             dist_y * dist_y +
-                                             dist_z * dist_z);
-        }
-    }
-
-    energy[idx] = e;
-
-    if (idx == 0) {
-       printf("%f\n", tot_energy[0]);
-    }
-
-}
-
-template<typename T>
 BarnesHut<T>::BarnesHut(SoAVec3<T> &bodies_pos,
                         int num_bodies,
                         float theta,
-                        float dt,
-                        int compute_energy_max_steps) :
+                        float dt) :
     _pos(bodies_pos),
     _num_bodies(num_bodies),
     _theta(theta),
-    _dt(dt),
-    _curr_step(0),
-    _compute_energy_max_steps(compute_energy_max_steps)
+    _dt(dt)
 {
     // Allocate space for traversal queues
-    cudaMalloc(&_queues, 2 * (num_bodies / GROUP_SIZE) * 8192 * sizeof(int));
-
-    std::cout << compute_energy_max_steps << std::endl;
-    // Allocate space for energy computation
-    if (compute_energy_max_steps > 0) {
-        cudaMalloc(&_tmp_energy, num_bodies * sizeof(T));
-
-        _tmp_reduce = nullptr;
-        cub::DeviceReduce::Sum(_tmp_reduce,
-                               _tmp_reduce_size,
-                               _tmp_energy,
-                               _total_energy,
-                               num_bodies);
-        cudaMalloc(&_tmp_reduce, _tmp_reduce_size);
-
-        cudaMalloc(&_total_energy, compute_energy_max_steps * sizeof(T));
-    }
+    cudaMalloc(&_queues, 2 * (num_bodies / GROUP_SIZE) * QUEUE_SIZE * sizeof(int));
 
     _vel.alloc(num_bodies);
+    _vel_half.alloc(num_bodies);
     _acc.alloc(num_bodies);
 
     _vel.zeros(num_bodies);
+    _acc.zeros(num_bodies);
 }
 
 template<typename T>
@@ -905,14 +643,22 @@ void BarnesHut<T>::solve_pos(const Octree<T> &octree,
         //_vel.hubble(_pos, _num_bodies, 1000);
     }
 
-    _acc.zeros(_num_bodies);
 
+    /*
     _compute_forces(octree,
                     codes_first_point_idx,
                     leaf_first_code_idx,
                     num_octree_leaves);
+    */
 
-    _update_pos();
+    leapfrog_integrate_pos<<<_num_bodies / MAX_THREADS_PER_BLOCK +
+                             (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
+                             MAX_THREADS_PER_BLOCK>>>(_pos,
+                                                      _vel,
+                                                      _vel_half,
+                                                      _acc,
+                                                      _dt,
+                                                      _num_bodies);
 }
 
 template<typename T>
@@ -926,29 +672,13 @@ void BarnesHut<T>::solve_vel(const Octree<T> &octree,
                     leaf_first_code_idx,
                     num_octree_leaves);
 
-    _update_vel();
-
-    if (_curr_step < _compute_energy_max_steps) {
-        _compute_energy();
-        ++_curr_step;
-    }
-}
-
-template<typename T>
-void BarnesHut<T>::_compute_energy()
-{
-    _compute_bodies_energy<<<_num_bodies / MAX_THREADS_PER_BLOCK +
-                            (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
-                            MAX_THREADS_PER_BLOCK>>>(_pos,
-                                                     _vel,
-                                                     _tmp_energy,
-                                                     _total_energy + _curr_step - (_curr_step > 0 ? 1 : 0),
-                                                     _num_bodies);
-    cub::DeviceReduce::Sum(_tmp_reduce,
-                           _tmp_reduce_size,
-                           _tmp_energy,
-                           _total_energy + _curr_step,
-                           _num_bodies);
+    leapfrog_integrate_vel<<<_num_bodies / MAX_THREADS_PER_BLOCK +
+                             (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
+                             MAX_THREADS_PER_BLOCK>>>(_vel,
+                                                      _vel_half,
+                                                      _acc,
+                                                      _dt,
+                                                      _num_bodies);
 }
 
 template<typename T>
@@ -969,52 +699,20 @@ void BarnesHut<T>::_compute_forces(const Octree<T> &octree,
                                  codes_first_point_idx,
                                  leaf_first_code_idx,
                                  _queues,
-                                 _queues + (_num_bodies / GROUP_SIZE) * 8192,
+                                 _queues + (_num_bodies / GROUP_SIZE) * QUEUE_SIZE,
                                  1,
                                  _theta,
                                  num_octree_leaves,
                                  _num_bodies);
-
-    /*
-    _compute_all_pairs_forces<<<_num_bodies / MAX_THREADS_PER_BLOCK +
-                                (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
-                                MAX_THREADS_PER_BLOCK>>>(_pos,
-                                                         _acc,
-                                                         _num_bodies);
-    */
-}
-
-template<typename T>
-void BarnesHut<T>::_update_pos()
-{
-    _leapfrog_integrate_pos<<<_num_bodies / MAX_THREADS_PER_BLOCK +
-                              (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
-                              MAX_THREADS_PER_BLOCK>>>(_pos,
-                                                       _vel,
-                                                       _acc,
-                                                       _dt,
-                                                       _num_bodies);
-}
-
-template<typename T>
-void BarnesHut<T>::_update_vel()
-{
-    _leapfrog_integrate_vel<<<_num_bodies / MAX_THREADS_PER_BLOCK +
-                              (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
-                              MAX_THREADS_PER_BLOCK>>>(_vel,
-                                                       _acc,
-                                                       _dt,
-                                                       _num_bodies);
 }
 
 template<typename T>
 BarnesHut<T>::~BarnesHut()
 {
-    if (_compute_energy_max_steps > 0) {
-        cudaFree(_tmp_energy);
-        cudaFree(_tmp_reduce);
-        cudaFree(_total_energy);
-    }
+    _vel.free();
+    _vel_half.free();
+    _acc.free();
+
     cudaFree(_queues);
 }
 

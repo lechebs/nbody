@@ -1,5 +1,7 @@
 #include "CUDAWrappers.hpp"
 
+#include <string>
+
 #include <GL/glew.h>
 #include <cuda_gl_interop.h>
 
@@ -7,6 +9,7 @@
 #include "cuda/btree.cuh"
 #include "cuda/octree.cuh"
 #include "cuda/barnes_hut.cuh"
+#include "cuda/validator.cuh"
 
 namespace CUDAWrappers
 {
@@ -16,7 +19,14 @@ namespace CUDAWrappers
             points(num_points),
             btree(num_points),
             octree(num_points),
-            bh(points.get_d_pos(), num_points, theta, dt, 5000) {}
+            bh(points.get_d_pos(), num_points, theta, dt),
+            validator(points.get_d_pos(),
+                      bh.get_d_vel(),
+                      bh.get_d_acc(),
+                      points.get_d_sort_indices_ptr(),
+                      num_points,
+                      dt,
+                      5000) {}
 
         Impl(int num_points, float theta, float dt, void *mapped_ptrs[5]) :
             points(num_points,
@@ -27,12 +37,21 @@ namespace CUDAWrappers
             octree(num_points,
                    static_cast<int *>(mapped_ptrs[3]),
                    static_cast<int *>(mapped_ptrs[4])),
-            bh(points.get_d_pos(), num_points, theta, dt, 0) {}
+            bh(points.get_d_pos(), num_points, theta, dt),
+            validator(points.get_d_pos(),
+                      bh.get_d_vel(),
+                      bh.get_d_acc(),
+                      points.get_d_sort_indices_ptr(),
+                      num_points,
+                      dt,
+                      5000) {}
 
         void updatePoints()
         {
             points.compute_morton_codes();
-            points.sort_by_codes(bh.get_d_vel(), bh.get_d_acc());
+            points.sort_by_codes(bh.get_d_vel(),
+                                 bh.get_d_vel_half(),
+                                 bh.get_d_acc());
             points.compute_unique_codes(btree.get_d_num_leaves_ptr());
             points.scan_attributes();
         }
@@ -84,6 +103,7 @@ namespace CUDAWrappers
         Btree btree;
         Octree<float> octree;
         BarnesHut<float> bh;
+        Validator<float> validator;
 
     private:
         int _num_leaves;
@@ -127,6 +147,10 @@ namespace CUDAWrappers
         _impl->points.sample_sphere();
         //_impl->points.sample_disk();
 
+        // TODO: Sample velocities here as well
+
+        _impl->validator.copy_initial_conditions();
+
         _impl->updatePoints();
         _impl->updateOctree(_params.max_num_codes_per_leaf);
     }
@@ -138,6 +162,8 @@ namespace CUDAWrappers
         cudaEventCreate(&stop);
 
         cudaEventRecord(start);
+
+        //_impl->validator.update_all_pairs();
 
         // Solve for position
         _impl->updateBodiesPos();
@@ -153,7 +179,12 @@ namespace CUDAWrappers
         float ms;
         cudaEventElapsedTime(&ms, start, stop);
 
-        //std::cout << "elapsed=" << ms << std::endl;
+        std::cout << "elapsed=" << ms << std::endl;
+    }
+
+    void Simulation::writeHistory(const std::string &csv_file_path)
+    {
+        _impl->validator.dump_history_to_csv(csv_file_path);
     }
 
     Simulation::~Simulation() {}

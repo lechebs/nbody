@@ -36,6 +36,13 @@ public:
         cudaMemset(_z, 0, n * sizeof(T));
     }
 
+    void copy(const SoAVec3<T> &src, int n)
+    {
+        cudaMemcpy(_x, src._x, n * sizeof(T), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(_y, src._y, n * sizeof(T), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(_z, src._z, n * sizeof(T), cudaMemcpyDeviceToDevice);
+    }
+
     void rand(int n)
     {
         T *buff = (T *) std::malloc(n * sizeof(T));
@@ -120,7 +127,7 @@ public:
         other._z = tmp;
     }
 
-    void gather(const SoAVec3<T> &src, int *map, int n)
+    void gather(const SoAVec3<T> &src, const int *map, int n)
     {
         thrust::gather(thrust::device, map, map + n, src._x, _x);
         thrust::gather(thrust::device, map, map + n, src._y, _y);
