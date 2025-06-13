@@ -43,6 +43,7 @@ void Camera::setPosition(const vec3 &position)
 void Camera::setSphericalPosition(const vec3 &position)
 {
     _spherical_position = position;
+    _target_spherical_position = position;
     _sphericalToCartesian();
 }
 
@@ -56,6 +57,12 @@ void Camera::setFrameOfReference(const vec3 &u, const vec3 &v, const vec3 &n)
 void Camera::setOrbitMode(bool flag)
 {
     _orbit_mode = flag;
+}
+
+void Camera::setOrbitModeCenter(const vec3 &center)
+{
+    _orbit_mode_center = center;
+    _orbit_mode_view_up = { 0.0f, 1.0f, 0.0f };
 }
 
 void Camera::lookAt(const vec3 &point, const vec3 &view_up)
@@ -83,14 +90,30 @@ void Camera::move(const vec3 &delta)
 
 void Camera::orbit(const vec3 &delta)
 {
-    _spherical_position -= delta;
+    _target_spherical_position -= delta;
+
+    // Clamp radius
+    if (_target_spherical_position[0] < 0.0001) {
+        _target_spherical_position[0] = 0.0001;
+    }
+
+    // Clamp theta
+    float theta = _target_spherical_position[1];
+    if (theta <= -M_PI / 2) {
+        theta = -M_PI / 2 + 0.0001;
+    } else if (theta >= M_PI / 2) {
+        theta = M_PI / 2 - 0.0001;
+    }
+    _target_spherical_position[1] = theta;
 }
 
 void Camera::update(float dt)
 {
     if (_orbit_mode) {
-        // TODO: interpolate spherical coordinates
+        _spherical_position += dt * _ORBIT_SPEED *
+            (_target_spherical_position - _spherical_position);
         _sphericalToCartesian();
+        lookAt(_orbit_mode_center, _orbit_mode_view_up);
     } else {
         // Linearly interpolating
         _position += dt * _MOVE_SPEED *

@@ -27,6 +27,7 @@ public:
                              const vec3 &v, /* y axis on view plane */
                              const vec3 &n  /* normal to the view plane */);
     void setOrbitMode(bool flag);
+    void setOrbitModeCenter(const vec3 &center);
     // Points the camera to the given point
     void lookAt(const vec3 &point,
                 const vec3 &view_up = { 0.0, 1.0, 0.0 });
@@ -72,10 +73,14 @@ private:
     mat4 _perspectiveProjection;
 
     bool _orbit_mode;
+    vec3 _orbit_mode_center;
+    vec3 _orbit_mode_view_up;
 
     vec3 _target_position;
+    vec3 _target_spherical_position;
 
     const float _MOVE_SPEED = 10.0f;
+    const float _ORBIT_SPEED = 10.0f;
 };
 
 #endif

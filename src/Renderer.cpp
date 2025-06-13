@@ -17,7 +17,7 @@
 #include "ShaderProgram.hpp"
 #include "CUDAWrappers.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 15;
+constexpr unsigned int N_POINTS = 2 << 17;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -29,9 +29,9 @@ Renderer::Renderer(unsigned int window_width,
     _window_width(window_width),
     _window_height(window_height),
     _window_title("nbody"),
-    _camera(M_PI / 3,
+    _camera(M_PI / 2,
             static_cast<float>(window_width) / window_height,
-            -0.01,
+            -0.001,
             -20.0) {}
 
 bool Renderer::init()
@@ -46,9 +46,11 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    CUDAWrappers::Simulation::Params p = { N_POINTS, 32, 0.8, 0.0001 };
+    CUDAWrappers::Simulation::Params p = { N_POINTS, 32, 0.5, 0.00001 };
     CUDAWrappers::Simulation simulation(p, _particles_ssbo);
-    simulation.samplePoints();
+    simulation.spawnBodies();
+
+    int step = 0;
 
     while (_running) {
         _handleEvents();
@@ -62,7 +64,7 @@ void Renderer::run()
         _renderFrame();
     }
 
-    simulation.writeHistory("output.csv");
+    //simulation.writeHistory("output-05.csv");
 }
 
 void Renderer::quit()
@@ -287,10 +289,10 @@ void Renderer::_setupScene()
     // glEnable(GL_DEPTH_TEST);
 
     //_camera.setPosition({ 0.0f, 0.0f, -1.0f });
-    _camera.setSphericalPosition({ 1.0f, 0.0f, M_PI / 2 });
-    _camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
+    _camera.setSphericalPosition({ 0.3f, 0.0f, M_PI / 2 });
 
     _camera.setOrbitMode(true);
+    _camera.setOrbitModeCenter({ 0.0f, 0.0f, 0.0f });
 
     for (int i = 0; i < _NUM_SHADER_PROGRAMS; ++i) {
         _shader_programs[i].loadUniformMat4(
@@ -350,12 +352,10 @@ void Renderer::_handleEvents()
         // Translating camera
         // _camera.move(normalized_mouse_delta);
 
-        if (true) {//!paused) {
-            _camera.orbit({
-                0, normalized_mouse_delta[1], normalized_mouse_delta[0] });
-            _camera.update(0.0);
-            _camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
-        }
+        _camera.orbit({
+            0, normalized_mouse_delta[1], normalized_mouse_delta[0] });
+        //_camera.update(0.0);
+        //_camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
     }
 
     prev_mouse_x = mouse_x;
@@ -374,6 +374,7 @@ void Renderer::_updateDeltaTime()
 
 void Renderer::_updateCamera()
 {
+    //_camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
     _camera.update(_delta_time);
 
     for (int i = 0; i < _NUM_SHADER_PROGRAMS; ++i) {
@@ -392,9 +393,11 @@ void Renderer::_renderFrame()
     glBindVertexArray(_quad_vao);
     glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, N_POINTS);
 
+    /*
     _shader_programs[CUBE_SHADER].enable();
     glBindVertexArray(_cube_vao);
     glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
+    */
 
     SDL_GL_SwapWindow(_window);
 }
