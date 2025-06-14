@@ -10,16 +10,18 @@
 #include "cuda/octree.cuh"
 #include "cuda/barnes_hut.cuh"
 #include "cuda/validator.cuh"
+#include "cuda/spawner.cuh"
 
 namespace CUDAWrappers
 {
     struct Simulation::Impl
     {
-        Impl(int num_points, float theta, float dt) :
-            points(num_points),
+        Impl(int num_points, float domain_size, float theta, float dt) :
+            points(num_points, domain_size),
             btree(num_points),
-            octree(num_points),
+            octree(num_points, domain_size),
             bh(points.get_d_pos(), num_points, theta, dt),
+            spawner(points.get_d_pos(), bh.get_d_vel(), num_points, 42),
             validator(points.get_d_pos(),
                       bh.get_d_vel(),
                       bh.get_d_acc(),
@@ -28,16 +30,25 @@ namespace CUDAWrappers
                       dt,
                       5000) {}
 
-        Impl(int num_points, float theta, float dt, void *mapped_ptrs[5]) :
+        Impl(int num_points,
+             float domain_size,
+             float theta,
+             float dt,
+             void *mapped_ptrs[7]) :
             points(num_points,
-                   static_cast<float *>(mapped_ptrs[0]),
-                   static_cast<float *>(mapped_ptrs[1]),
-                   static_cast<float *>(mapped_ptrs[2])),
+                   domain_size,
+                   static_cast<double *>(mapped_ptrs[0]),
+                   static_cast<double *>(mapped_ptrs[1]),
+                   static_cast<double *>(mapped_ptrs[2])),
             btree(num_points),
             octree(num_points,
-                   static_cast<int *>(mapped_ptrs[3]),
-                   static_cast<int *>(mapped_ptrs[4])),
+                   domain_size,
+                   static_cast<double *>(mapped_ptrs[3]),
+                   static_cast<double *>(mapped_ptrs[4]),
+                   static_cast<double *>(mapped_ptrs[5]),
+                   static_cast<double *>(mapped_ptrs[6])),
             bh(points.get_d_pos(), num_points, theta, dt),
+            spawner(points.get_d_pos(), bh.get_d_vel(), num_points, 42),
             validator(points.get_d_pos(),
                       bh.get_d_vel(),
                       bh.get_d_acc(),
@@ -49,9 +60,8 @@ namespace CUDAWrappers
         void updatePoints()
         {
             points.compute_morton_codes();
-            points.sort_by_codes(bh.get_d_vel(),
-                                 bh.get_d_vel_half(),
-                                 bh.get_d_acc());
+            points.sort_by_codes();
+            bh.sort_bodies(points.get_d_sort_indices_ptr());
             points.compute_unique_codes(btree.get_d_num_leaves_ptr());
             points.scan_attributes();
         }
@@ -99,11 +109,12 @@ namespace CUDAWrappers
                          _num_leaves);
         }
 
-        Points<float> points;
+        Points<double> points;
         Btree btree;
-        Octree<float> octree;
-        BarnesHut<float> bh;
-        Validator<float> validator;
+        Octree<double> octree;
+        BarnesHut<double> bh;
+        Spawner<double> spawner;
+        Validator<double> validator;
 
     private:
         int _num_leaves;
@@ -113,16 +124,17 @@ namespace CUDAWrappers
         _params(params)
     {
         _impl = std::make_unique<Simulation::Impl>(params.num_points,
+                                                   params.domain_size,
                                                    params.theta,
                                                    params.dt);
     }
 
-    Simulation::Simulation(Simulation::Params &params, GLuint buffers[5]) :
+    Simulation::Simulation(Simulation::Params &params, GLuint buffers[7]) :
         _params(params)
     {
-        void *mapped_ptrs[5];
+        void *mapped_ptrs[7];
 
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < 7; ++i) {
             cudaGraphicsResource_t res;
             // Mapping OpenGL buffer for access by CUDA
             cudaGraphicsGLRegisterBuffer(&res,
@@ -135,22 +147,20 @@ namespace CUDAWrappers
         }
 
         _impl = std::make_unique<Simulation::Impl>(params.num_points,
+                                                   params.domain_size,
                                                    params.theta,
                                                    params.dt,
                                                    mapped_ptrs);
     }
 
-    void Simulation::samplePoints()
+    void Simulation::spawnBodies()
     {
-        //_impl->points.sample_uniform();
-        //_impl->points.sample_plummer();
-        _impl->points.sample_sphere();
-        //_impl->points.sample_disk();
+        _impl->spawner.sample_rotating_disk(0.3);
+        //_impl->spawner.sample_uniform_pos();
+        //_impl->spawner.sample_spherical_pos(0.3);
+        //_impl->spawner.sample_plummer(0.1);
 
-        // TODO: Sample velocities here as well
-
-        _impl->validator.copy_initial_conditions();
-
+        //_impl->validator.copy_initial_conditions();
         _impl->updatePoints();
         _impl->updateOctree(_params.max_num_codes_per_leaf);
     }
@@ -173,13 +183,19 @@ namespace CUDAWrappers
         // Solve for velocity
         _impl->updateBodiesVel();
 
+
         cudaEventRecord(stop);
         cudaEventSynchronize(stop);
 
         float ms;
         cudaEventElapsedTime(&ms, start, stop);
 
-        std::cout << "elapsed=" << ms << std::endl;
+        //std::cout << "elapsed=" << ms << std::endl;
+    }
+
+    int Simulation::get_num_octree_nodes()
+    {
+        return _impl->octree.get_num_nodes();
     }
 
     void Simulation::writeHistory(const std::string &csv_file_path)

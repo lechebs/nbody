@@ -43,73 +43,6 @@ public:
         cudaMemcpy(_z, src._z, n * sizeof(T), cudaMemcpyDeviceToDevice);
     }
 
-    void rand(int n)
-    {
-        T *buff = (T *) std::malloc(n * sizeof(T));
-        T *dst[3] = { _x, _y, _z };
-
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 0; j < n; ++j) {
-                buff[j] = ((T) std::rand() - RAND_MAX / 2) / RAND_MAX / 2;
-            }
-            cudaMemcpy(dst[i], buff, n * sizeof(T), cudaMemcpyHostToDevice);
-        }
-
-        std::free(buff);
-    }
-
-    void sphere(int n, float r)
-    {
-        T *x_buff = (T *) std::malloc(n * sizeof(T));
-        T *y_buff = (T *) std::malloc(n * sizeof(T));
-        T *z_buff = (T *) std::malloc(n * sizeof(T));
-
-        for (int i = 0; i < n; ++i) {
-            T rad = std::pow((T) std::rand() / RAND_MAX, 1. / 3) * r;
-            T theta = std::acos(2.0 * std::rand() / RAND_MAX - 1.0);
-            T phi = (T) std::rand() / RAND_MAX * 2 * M_PI;
-
-            x_buff[i] = 0.5 + rad * std::sin(theta) * std::cos(phi);
-            y_buff[i] = 0.5 + rad * std::sin(theta) * std::sin(phi);
-            z_buff[i] = 0.5 + rad * std::cos(theta);
-
-        }
-
-        cudaMemcpy(_x, x_buff, n * sizeof(T), cudaMemcpyHostToDevice);
-        cudaMemcpy(_y, y_buff, n * sizeof(T), cudaMemcpyHostToDevice);
-        cudaMemcpy(_z, z_buff, n * sizeof(T), cudaMemcpyHostToDevice);
-
-        std::free(x_buff);
-        std::free(y_buff);
-        std::free(z_buff);
-    }
-
-    void disk(int n, float r)
-    {
-        T *x_buff = (T *) std::malloc(n * sizeof(T));
-        T *y_buff = (T *) std::malloc(n * sizeof(T));
-        T *z_buff = (T *) std::malloc(n * sizeof(T));
-
-        for (int i = 0; i < n; ++i) {
-            T rad = r * std::log(1 - (T) std::rand() / RAND_MAX);
-            T theta = (T) std::rand() / RAND_MAX * 2 * M_PI;
-
-            x_buff[i] = 0.5 + rad * std::cos(theta);
-            y_buff[i] = 0.5 + rad * std::sin(theta);
-            z_buff[i] = 0.5;
-
-        }
-
-        cudaMemcpy(_x, x_buff, n * sizeof(T), cudaMemcpyHostToDevice);
-        cudaMemcpy(_y, y_buff, n * sizeof(T), cudaMemcpyHostToDevice);
-        cudaMemcpy(_z, z_buff, n * sizeof(T), cudaMemcpyHostToDevice);
-
-        std::free(x_buff);
-        std::free(y_buff);
-        std::free(z_buff);
-
-    }
-
     void swap(SoAVec3<T> &other)
     {
         T *tmp;
@@ -156,41 +89,6 @@ public:
             x_dst[i] = x * h0 * r;
             y_dst[i] = y * h0 * r;
             z_dst[i] = z * h0 * r;
-        }
-
-        cudaMemcpy(_x, x_dst, n * sizeof(T), cudaMemcpyHostToDevice);
-        cudaMemcpy(_y, y_dst, n * sizeof(T), cudaMemcpyHostToDevice);
-        cudaMemcpy(_z, z_dst, n * sizeof(T), cudaMemcpyHostToDevice);
-
-        std::free(x_pos);
-        std::free(y_pos);
-        std::free(z_pos);
-        std::free(x_dst);
-        std::free(y_dst);
-        std::free(z_dst);
-    }
-
-    void tangent(const SoAVec3<T> _pos, int n)
-    {
-        T *x_pos = (T *) std::malloc(n * sizeof(T));
-        T *y_pos = (T *) std::malloc(n * sizeof(T));
-        T *z_pos = (T *) std::malloc(n * sizeof(T));
-
-        cudaMemcpy(x_pos, _pos._x, n * sizeof(T), cudaMemcpyDeviceToHost);
-        cudaMemcpy(y_pos, _pos._y, n * sizeof(T), cudaMemcpyDeviceToHost);
-        cudaMemcpy(z_pos, _pos._z, n * sizeof(T), cudaMemcpyDeviceToHost);
-
-        T *x_dst = (T *) std::malloc(n * sizeof(T));
-        T *y_dst = (T *) std::malloc(n * sizeof(T));
-        T *z_dst = (T *) std::malloc(n * sizeof(T));
-
-        for (int i = 0; i < n; ++i) {
-            T x = x_pos[i] - 0.5;
-            T y = y_pos[i] - 0.5;
-            T r = std::sqrt(x * x + y * y);
-            x_dst[i] = -y * 100;
-            y_dst[i] = x * 100;
-            z_dst[i] = 0.0;//(std::rand() - RAND_MAX / 2 ) / RAND_MAX / 2 * 500;
         }
 
         cudaMemcpy(_x, x_dst, n * sizeof(T), cudaMemcpyHostToDevice);

@@ -26,10 +26,13 @@ __device__ __forceinline__ int _traverse(const int *child,
     return bin_node;
 }
 
+template<typename T>
 __global__ void _build_octree(const SoABtreeNodes btree_nodes,
                               SoAOctreeNodes octree_nodes,
+                              T *octree_nodes_size,
                               const int *btree_octree_map,
                               const int *btree_num_leaves,
+                              float domain_size,
                               int *octree_num_nodes)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -43,6 +46,7 @@ __global__ void _build_octree(const SoABtreeNodes btree_nodes,
         *octree_num_nodes =
             btree_octree_map[btree_num_nodes - 1] +
             btree_nodes.edge_delta(btree_num_nodes - 1);
+        //printf("num_octree_nodes=%d\n", *octree_num_nodes);
     }
 
     int parent = btree_octree_map[idx];
@@ -51,9 +55,8 @@ __global__ void _build_octree(const SoABtreeNodes btree_nodes,
     octree_nodes.num_children(parent) = 0;
 
     int node_level = btree_nodes.lcp(idx) / 3;
-    // Computing the side length of the cube
-    // spanned by the octree node
-    octree_nodes.size(parent) = 1.0 / (1 << node_level);
+    // Computing the side length of the cube spanned by the octree node
+    octree_nodes_size[parent] = domain_size / (1 << node_level);
 
     int node_leaves_begin = btree_nodes.leaves_begin(idx);
     int node_leaves_end = btree_nodes.leaves_end(idx);
@@ -149,40 +152,48 @@ _compute_octree_nodes_barycenter(const SoAVec3<T> points,
     // The prefix sum of the mass array needs to be computed as well
 }
 
-template<typename T> Octree<T>::Octree(int max_num_leaves) :
+template<typename T> Octree<T>::Octree(int max_num_leaves,
+                                       float domain_size) :
+    _domain_size(domain_size),
     _gl_buffers(false)
+{
+    _init(max_num_leaves);
+
+    _barycenters.alloc(_max_num_nodes);
+
+    cudaMalloc(&_nodes_size, _max_num_nodes * sizeof(T));
+}
+
+template<typename T> Octree<T>::Octree(int max_num_leaves,
+                                       float domain_size,
+                                       T *d_barycenters_x,
+                                       T *d_barycenters_y,
+                                       T *d_barycenters_z,
+                                       T *d_nodes_size) :
+    _domain_size(domain_size),
+    _gl_buffers(true)
+{
+    _init(max_num_leaves);
+
+    _barycenters.x() = d_barycenters_x;
+    _barycenters.y() = d_barycenters_y;
+    _barycenters.z() = d_barycenters_z;
+
+    _nodes_size = d_nodes_size;
+}
+
+template<typename T> void Octree<T>::_init(int max_num_leaves)
 {
     _max_num_nodes = min(
         2 * max_num_leaves,
         geometric_sum(8, ceil(log2(max_num_leaves) / 3.0) + 1.0));
 
     cudaMalloc(&_num_nodes, sizeof(int));
-
     cudaMalloc(&_points_begin, _max_num_nodes * sizeof(int));
     cudaMalloc(&_points_end, _max_num_nodes * sizeof(int));
 
     _nodes.alloc(_max_num_nodes);
-    _barycenters.alloc(_max_num_nodes);
 }
-
-template<typename T> Octree<T>::Octree(int max_num_leaves,
-                                       int *d_points_begin,
-                                       int *d_points_end) :
-    _gl_buffers(true)
-{
-    _max_num_nodes = min(
-        2 * max_num_leaves,
-        geometric_sum(8, ceil(log2(max_num_leaves) / 3.0) + 1.0));
-
-    cudaMalloc(&_num_nodes, sizeof(int));
-
-    _points_begin = d_points_begin;
-    _points_end = d_points_end;
-
-    _nodes.alloc(_max_num_nodes);
-    _barycenters.alloc(_max_num_nodes);
-}
-
 
 template<typename T> void Octree<T>::build(const Btree &btree)
 {
@@ -190,8 +201,10 @@ template<typename T> void Octree<T>::build(const Btree &btree)
                     (btree.get_max_num_nodes() % THREADS_PER_BLOCK > 0),
                     THREADS_PER_BLOCK>>>(btree.get_d_nodes(),
                                          _nodes,
+                                         _nodes_size,
                                          btree.get_d_octree_map_ptr(),
                                          btree.get_d_num_leaves_ptr(),
+                                         _domain_size,
                                          _num_nodes);
 }
 
@@ -228,14 +241,15 @@ void Octree<T>::compute_nodes_barycenter(const Points<T> &points)
 template<typename T> Octree<T>::~Octree()
 {
     cudaFree(_num_nodes);
-
-    if (!_gl_buffers) {
-        cudaFree(_points_begin);
-        cudaFree(_points_end);
-    }
+    cudaFree(_points_begin);
+    cudaFree(_points_end);
 
     _nodes.free();
-    _barycenters.free();
+
+    if (!_gl_buffers) {
+        _barycenters.free();
+        cudaFree(_nodes_size);
+    }
 }
 
 // Explicit templates instantiation

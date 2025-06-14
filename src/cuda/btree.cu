@@ -124,6 +124,7 @@ __device__ void _set_node_child(const morton_t *codes,
     nodes.depth(2 * child_idx + !is_leaf) = delta;
 
     if (is_leaf) {
+        nodes.lcp(2 * child_idx) = parent_lcp + 3;
         nodes.left(2 * child_idx) = 0;
         nodes.right(2 * child_idx) = 0;
         nodes.leaves_begin(2 * child_idx) = child_idx;
@@ -515,8 +516,6 @@ void Btree::build(const morton_t *d_sorted_codes)
     }
 }
 
-// TODO: sorting is costly, compare the traversal
-// performance without bfs ordering
 void Btree::sort_to_bfs_order()
 {
     // Sort arrays by depth
@@ -527,8 +526,6 @@ void Btree::sort_to_bfs_order()
 
     // TODO: custom sort?
 
-    // TODO: try to memcpy to host the actual number of leaves
-    // and sort only the used nodes
     cub::DeviceMergeSort::StableSortPairs(
         _tmp_sort,
         _tmp_sort_size,

@@ -27,6 +27,8 @@ public:
         return _acc;
     }
 
+    void sort_bodies(const int *sort_indices);
+
     // TODO: takes this parameters from constructor
     void solve_pos(const Octree<T> &octree,
                    const int *codes_first_point_idx,
@@ -51,9 +53,14 @@ private:
     float _dt;
 
     SoAVec3<T> &_pos;
+
     SoAVec3<T> _vel;
     SoAVec3<T> _vel_half;
     SoAVec3<T> _acc;
+
+    SoAVec3<T> tmp_vel_;
+    SoAVec3<T> tmp_vel_half_;
+    SoAVec3<T> tmp_acc_;
 
     int *_queues;
 };

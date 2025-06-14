@@ -10,7 +10,8 @@
 #define WARP_SIZE 32
 #define GROUP_SIZE 32
 #define NUM_WARPS (GROUP_SIZE / WARP_SIZE)
-#define QUEUE_SIZE 8192
+// WARNING: too big may cause invalid device ordinal
+#define QUEUE_SIZE 4192
 
 // TODO: try removing inlining to reduce registers usage
 __device__ __forceinline__ int _warp_scan(int var, int lane_idx)
@@ -195,6 +196,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                      SoAVec3<T> bodies_acc,
                                      const SoAOctreeNodes nodes,
                                      const SoAVec3<T> nodes_barycenter,
+                                     const T *nodes_size,
                                      const int *bodies_begin,
                                      const int *bodies_end,
                                      const int *codes_first_point_idx,
@@ -316,7 +318,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
 
                 num_children = nodes.num_children(node);
                 first_child = nodes.first_child(node);
-                float size = nodes.size(node);
+                float size = nodes_size[node];
 
                 is_leaf = num_children == 0;
                 approx_node = _approx_crit(size, min_dist, theta) &&
@@ -595,17 +597,12 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     bodies_acc.z(body_idx) = fz;
 
     /*
-    if (blockIdx.x < 10 && threadIdx.x == 0)
-        printf("%d, %d\n", tot_queue_size, leaves_eval);
-        */
-
-    //printf("opened=%d, approx=%d, leaves=%d\n", n_opened, n_approx, n_leaves);
-
-    /*
-    if (n_p2p != num_bodies) {
-        printf("WARNING: %d %d %d\n", blockIdx.x, threadIdx.x, n_p2p);
+    if (body_idx == 0) {
+        printf("%d\n", n_p2p);
     }
     */
+
+    //printf("opened=%d, approx=%d, leaves=%d\n", n_opened, n_approx, n_leaves);
 }
 
 template<typename T>
@@ -625,8 +622,24 @@ BarnesHut<T>::BarnesHut(SoAVec3<T> &bodies_pos,
     _vel_half.alloc(num_bodies);
     _acc.alloc(num_bodies);
 
+    tmp_vel_.alloc(num_bodies);
+    tmp_vel_half_.alloc(num_bodies);
+    tmp_acc_.alloc(num_bodies);
+
     _vel.zeros(num_bodies);
     _acc.zeros(num_bodies);
+}
+
+template<typename T>
+void BarnesHut<T>::sort_bodies(const int *sort_indices)
+{
+    tmp_vel_.gather(_vel, sort_indices, _num_bodies);
+    tmp_vel_half_.gather(_vel_half, sort_indices, _num_bodies);
+    tmp_acc_.gather(_acc, sort_indices, _num_bodies);
+
+    _vel.swap(tmp_vel_);
+    _vel_half.swap(tmp_vel_half_);
+    _acc.swap(tmp_acc_);
 }
 
 template<typename T>
@@ -635,22 +648,6 @@ void BarnesHut<T>::solve_pos(const Octree<T> &octree,
                              const int *leaf_first_code_idx,
                              int num_octree_leaves)
 {
-    static int init = 0;
-    if (!init) {
-        init = 1;
-        //_vel.tangent(_pos, _num_bodies);
-        //_vel.rand(_num_bodies);
-        //_vel.hubble(_pos, _num_bodies, 1000);
-    }
-
-
-    /*
-    _compute_forces(octree,
-                    codes_first_point_idx,
-                    leaf_first_code_idx,
-                    num_octree_leaves);
-    */
-
     leapfrog_integrate_pos<<<_num_bodies / MAX_THREADS_PER_BLOCK +
                              (_num_bodies % MAX_THREADS_PER_BLOCK > 0),
                              MAX_THREADS_PER_BLOCK>>>(_pos,
@@ -694,12 +691,14 @@ void BarnesHut<T>::_compute_forces(const Octree<T> &octree,
                                  _acc,
                                  octree.get_d_nodes(),
                                  octree.get_d_barycenters(),
+                                 octree.get_d_nodes_size(),
                                  octree.get_d_points_begin_ptr(),
                                  octree.get_d_points_end_ptr(),
                                  codes_first_point_idx,
                                  leaf_first_code_idx,
                                  _queues,
-                                 _queues + (_num_bodies / GROUP_SIZE) * QUEUE_SIZE,
+                                 _queues + (_num_bodies / GROUP_SIZE) *
+                                    QUEUE_SIZE,
                                  1,
                                  _theta,
                                  num_octree_leaves,
@@ -712,6 +711,10 @@ BarnesHut<T>::~BarnesHut()
     _vel.free();
     _vel_half.free();
     _acc.free();
+
+    tmp_vel_.free();
+    tmp_vel_half_.free();
+    tmp_acc_.free();
 
     cudaFree(_queues);
 }

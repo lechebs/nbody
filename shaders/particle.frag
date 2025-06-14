@@ -29,13 +29,9 @@ void main()
     gl_FragDepth = frag_clip_pos.z / frag_clip_pos.w;
     */
 
-    vec4 color;
-    if (is_selected > 0) {
-        color = vec4(0.9f, 0.3f, 0.2f, 1.0f);
-    } else {
-        color = vec4(0.8f, 0.7f, 0.6f, 1.0f);
-    }
+    vec4 color = vec4(0.9f, 0.3f, 0.2f, 1.0f);
 
     // Simple sphere shading
-    frag_color = color * vec4(1.0f, 1.0f, 1.0f, (1.0f - r) * 0.05);
+    float falloff = (1.0f - r) * (1.0f - r) * (1.0f - r);
+    frag_color = color * vec4(1.0f, 1.0f, 1.0f, falloff * 1f);
 }

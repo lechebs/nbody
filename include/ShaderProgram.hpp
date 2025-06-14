@@ -23,6 +23,8 @@ public:
     void enable();
     // Loads a single integer inside a int GLSL uniform
     bool loadUniformInt(const std::string &name, int value);
+    // Loads a single float inside a float GLSL uniform
+    bool loadUniformFloat(const std::string &name, float value);
     // Loads a matrix inside a mat4 GLSL uniform
     bool loadUniformMat4(const std::string &name,
                          const Matrix<float, 4, 4> &value);

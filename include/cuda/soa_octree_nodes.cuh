@@ -27,11 +27,6 @@ public:
         return _leaves_end[idx];
     }
 
-    __device__ __forceinline__ float size(int idx) const
-    {
-        return _size[idx];
-    }
-
     // Device setters
     __device__ __forceinline__ int &first_child(int idx)
     {
@@ -53,18 +48,12 @@ public:
         return _leaves_end[idx];
     }
 
-    __device__ __forceinline__ float &size(int idx)
-    {
-        return _size[idx];
-    }
-
     void alloc(int num_nodes)
     {
         cudaMalloc(&_first_child, num_nodes * sizeof(int));
         cudaMalloc(&_num_children, num_nodes * sizeof(int));
         cudaMalloc(&_leaves_begin, num_nodes * sizeof(int));
         cudaMalloc(&_leaves_end, num_nodes * sizeof(int));
-        cudaMalloc(&_size, num_nodes * sizeof(float));
     }
 
     void free()
@@ -73,7 +62,6 @@ public:
         cudaFree(_num_children);
         cudaFree(_leaves_begin);
         cudaFree(_leaves_end);
-        cudaFree(_size);
     }
 
 private:
@@ -84,8 +72,6 @@ private:
     // Arrays to store the range of leaves covered by each node
     int *_leaves_begin;
     int *_leaves_end;
-    // Array to store the cube side length covered by each node
-    float *_size;
 };
 
 #endif

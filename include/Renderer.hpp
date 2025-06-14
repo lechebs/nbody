@@ -22,9 +22,10 @@ public:
     ~Renderer();
 
 private:
-    enum ShaderProgramId { PARTICLE_SHADER, CUBE_SHADER };
+    enum ShaderProgramId { PARTICLE_SHADER, CUBE_SHADER, OCTREE_SHADER };
 
-    constexpr static int _NUM_SHADER_PROGRAMS = 2;
+    constexpr static int _NUM_SHADER_PROGRAMS = 3;
+    constexpr static int _NUM_SSBOS = 7;
 
     bool _init();
     bool _loadShaders();
@@ -48,7 +49,7 @@ private:
 
     GLuint _quad_vao;
     GLuint _cube_vao;
-    GLuint _particles_ssbo[5];
+    GLuint _ssbos[_NUM_SSBOS];
 
     ShaderProgram _shader_programs[_NUM_SHADER_PROGRAMS];
 

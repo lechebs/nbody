@@ -19,16 +19,6 @@
 
 __device__ __forceinline__ morton_t _expand_bits(morton_t u)
 {
-    u = (u * 0x00010001u) & 0xFF0000FFu;
-    u = (u * 0x00000101u) & 0x0F00F00Fu;
-    u = (u * 0x00000011u) & 0xC30C30C3u;
-    u = (u * 0x00000005u) & 0x49249249u;
-
-    return u;
-}
-
-__device__ __forceinline__ morton_t _expand_bitsll(morton_t u)
-{
     u &= 0x00000000001fffffu;
     u = (u * 0x0000000100000001u) & 0x1F00000000FFFFu;
     u = (u * 0x0000000000010001u) & 0x1F0000FF0000FFu;
@@ -38,11 +28,11 @@ __device__ __forceinline__ morton_t _expand_bitsll(morton_t u)
     return u;
 }
 
-// Computes 30-bit morton code by interleaving the bits
-// of the coordinates, supposing that they are normalized
-// in the range [0.0, 1.0]
+// Computes 63-bit morton code by interleaving the bits
+// of the normalized coordinates
 template<typename T> __global__ void _morton_encode(const SoAVec3<T> pos,
                                                     morton_t *codes,
+                                                    float domain_size,
                                                     int num_points)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -50,24 +40,14 @@ template<typename T> __global__ void _morton_encode(const SoAVec3<T> pos,
         return;
     }
 
-    // Scale coordinates to [0, 2^10)
-    /*
-    morton_t x = (morton_t) (pos.x(idx) * 1023.0f);
-    morton_t y = (morton_t) (pos.y(idx) * 1023.0f);
-    morton_t z = (morton_t) (pos.z(idx) * 1023.0f);
-    */
-    morton_t x = (morton_t) (pos.x(idx) * 2097151.0f);
-    morton_t y = (morton_t) (pos.y(idx) * 2097151.0f);
-    morton_t z = (morton_t) (pos.z(idx) * 2097151.0f);
+    // Map coordinates to [0, 2^(21)-1]
+    morton_t x = (morton_t) (pos.x(idx) / domain_size * 2097151.0f);
+    morton_t y = (morton_t) (pos.y(idx) / domain_size * 2097151.0f);
+    morton_t z = (morton_t) (pos.z(idx) / domain_size * 2097151.0f);
 
-    /*
     x = _expand_bits(x);
     y = _expand_bits(y);
     z = _expand_bits(z);
-    */
-    x = _expand_bitsll(x);
-    y = _expand_bitsll(y);
-    z = _expand_bitsll(z);
 
     // Left shift x by 2 bits, y by 1 bit, then bitwise or
     codes[idx] = x * 4 + y * 2 + z;
@@ -76,8 +56,9 @@ template<typename T> __global__ void _morton_encode(const SoAVec3<T> pos,
 template<typename T> class Points
 {
 public:
-    Points(int num_points) :
+    Points(int num_points, float domain_size) :
         _num_points(num_points),
+        _domain_size(domain_size),
         _rng(_SEED),
         _gl_buffers(false)
     {
@@ -85,8 +66,9 @@ public:
         _init(num_points);
     }
 
-    Points(int num_points, T *x, T *y, T *z) :
+    Points(int num_points, float domain_size, T *x, T *y, T *z) :
         _num_points(num_points),
+        _domain_size(domain_size),
         _rng(_SEED),
         _gl_buffers(true)
     {
@@ -126,75 +108,17 @@ public:
         return _range;
     }
 
-    void sample_uniform()
-    {
-        thrust::host_vector<T> x(_num_points);
-        thrust::host_vector<T> y(_num_points);
-        thrust::host_vector<T> z(_num_points);
-
-        thrust::uniform_real_distribution<T> dist;
-        //thrust::normal_distribution<T> dist(0.5, 0.1);
-        auto dist_gen = [&] { return max(0.0, min(1.0, dist(_rng))); };
-
-        thrust::generate(x.begin(), x.end(), dist_gen);
-        thrust::generate(y.begin(), y.end(), dist_gen);
-        thrust::generate(z.begin(), z.end(), dist_gen);
-
-        /*
-        for (int i = 0; i < _num_points; ++i) {
-            if (i % 3 == 0) {
-                x[i] -= 0.25;
-                y[i] -= 0.25;
-                z[i] += 0.25;
-            } else if (i % 3 == 1) {
-                x[i] -= 0.25;
-                y[i] += 0.25;
-                z[i] += 0.25;
-            } else {
-                x[i] += 0.25;
-                y[i] += 0.25;
-                z[i] -= 0.25;
-            }
-        }
-        */
-
-        cudaMemcpy(_pos.x(),
-                   thrust::raw_pointer_cast(&x[0]),
-                   _num_points * sizeof(T),
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(_pos.y(),
-                   thrust::raw_pointer_cast(&y[0]),
-                   _num_points * sizeof(T),
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(_pos.z(),
-                   thrust::raw_pointer_cast(&z[0]),
-                   _num_points * sizeof(T),
-                   cudaMemcpyHostToDevice);
-    }
-
-    void sample_plummer()
-    {
-        _pos.plummer(_num_points, 0.2);
-    }
-
-    void sample_sphere()
-    {
-        _pos.sphere(_num_points, 0.3);
-    }
-
-    void sample_disk()
-    {
-        _pos.disk(_num_points, 0.1);
-    }
-
     void compute_morton_codes()
     {
         _morton_encode<<<_num_points / MAX_THREADS_PER_BLOCK +
                          (_num_points % MAX_THREADS_PER_BLOCK > 0),
-                         MAX_THREADS_PER_BLOCK>>>(_pos, _codes, _num_points);
+                         MAX_THREADS_PER_BLOCK>>>(_pos,
+                                                  _codes,
+                                                  _domain_size,
+                                                  _num_points);
     }
 
-    void sort_by_codes(SoAVec3<T> &vel, SoAVec3<T> &vel_half, SoAVec3<T> &acc)
+    void sort_by_codes()
     {
         thrust::sequence(thrust::device, _range, _range + _num_points);
 
@@ -207,9 +131,6 @@ public:
                                         less_op);
 
         _tmp_pos.gather(_pos, _range, _num_points);
-        _tmp_vel.gather(vel, _range, _num_points);
-        _tmp_vel_half.gather(vel_half, _range, _num_points);
-        _tmp_acc.gather(acc, _range, _num_points);
 
         if (_gl_buffers) {
             // Copying back to original buffer since it's where
@@ -229,10 +150,6 @@ public:
         } else {
             _pos.swap(_tmp_pos);
         }
-
-        vel.swap(_tmp_vel);
-        vel_half.swap(_tmp_vel_half);
-        acc.swap(_tmp_acc);
     }
 
     void compute_unique_codes(int *d_num_unique_codes)
@@ -261,18 +178,18 @@ public:
 
         // Scan coordinates to later compute the barycenter
         // of the octree nodes
-        cub::DeviceScan::ExclusiveSum(_tmp_scan,
-                                      _tmp_scan_size,
+        cub::DeviceScan::ExclusiveSum(_tmp_scan_pos,
+                                      _tmp_scan_pos_size,
                                       _pos.x(),
                                       _scan_pos.x(),
                                       _num_points);
-        cub::DeviceScan::ExclusiveSum(_tmp_scan,
-                                      _tmp_scan_size,
+        cub::DeviceScan::ExclusiveSum(_tmp_scan_pos,
+                                      _tmp_scan_pos_size,
                                       _pos.y(),
                                       _scan_pos.y(),
                                       _num_points);
-        cub::DeviceScan::ExclusiveSum(_tmp_scan,
-                                      _tmp_scan_size,
+        cub::DeviceScan::ExclusiveSum(_tmp_scan_pos,
+                                      _tmp_scan_pos_size,
                                       _pos.z(),
                                       _scan_pos.z(),
                                       _num_points);
@@ -285,9 +202,6 @@ public:
         }
         _tmp_pos.free();
         _scan_pos.free();
-        _tmp_vel.free();
-        _tmp_vel_half.free();
-        _tmp_acc.free();
 
         cudaFree(_codes);
         cudaFree(_unique_codes);
@@ -299,6 +213,7 @@ public:
         cudaFree(_tmp_sort);
         cudaFree(_tmp_runlength);
         cudaFree(_tmp_scan);
+        cudaFree(_tmp_scan_pos);
     }
 
 private:
@@ -306,9 +221,6 @@ private:
     {
         _tmp_pos.alloc(num_points);
         _scan_pos.alloc(num_points);
-        _tmp_vel.alloc(num_points);
-        _tmp_vel_half.alloc(num_points);
-        _tmp_acc.alloc(num_points);
 
         cudaMalloc(&_codes, num_points * sizeof(morton_t));
         cudaMalloc(&_unique_codes, num_points * sizeof(morton_t));
@@ -345,6 +257,15 @@ private:
                                       _codes_first_point_idx,
                                       num_points);
         cudaMalloc(&_tmp_scan, _tmp_scan_size);
+
+        _tmp_scan_pos = nullptr;
+        cub::DeviceScan::ExclusiveSum(_tmp_scan_pos,
+                                      _tmp_scan_pos_size,
+                                      _pos.x(),
+                                      _scan_pos.x(),
+                                      num_points);
+        cudaMalloc(&_tmp_scan_pos, _tmp_scan_pos_size);
+
     }
 
     const static int _SEED = 100;
@@ -355,13 +276,11 @@ private:
     const bool _gl_buffers;
 
     int _num_points;
+    float _domain_size;
 
     SoAVec3<T> _pos;
     SoAVec3<T> _tmp_pos;
     SoAVec3<T> _scan_pos;
-    SoAVec3<T> _tmp_vel;
-    SoAVec3<T> _tmp_vel_half;
-    SoAVec3<T> _tmp_acc;
 
     morton_t *_codes;
     morton_t *_unique_codes;
@@ -379,6 +298,9 @@ private:
 
     int *_tmp_scan;
     size_t _tmp_scan_size;
+
+    T *_tmp_scan_pos;
+    size_t _tmp_scan_pos_size;
 };
 
 #endif

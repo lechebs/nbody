@@ -17,7 +17,7 @@
 #include "ShaderProgram.hpp"
 #include "CUDAWrappers.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 17;
+constexpr unsigned int N_POINTS = 2 << 15;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -29,7 +29,7 @@ Renderer::Renderer(unsigned int window_width,
     _window_width(window_width),
     _window_height(window_height),
     _window_title("nbody"),
-    _camera(M_PI / 2,
+    _camera(M_PI / 6,
             static_cast<float>(window_width) / window_height,
             -0.001,
             -20.0) {}
@@ -39,6 +39,8 @@ bool Renderer::init()
     return _initialized = _init() && _loadShaders();
 }
 
+static int num_octree_nodes = 0;
+
 void Renderer::run()
 {
     assert(_initialized);
@@ -46,25 +48,26 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    CUDAWrappers::Simulation::Params p = { N_POINTS, 32, 0.5, 0.00001 };
-    CUDAWrappers::Simulation simulation(p, _particles_ssbo);
+    CUDAWrappers::Simulation::Params p = { N_POINTS, 32, 1.0, 0.95, 0.000005 };
+    CUDAWrappers::Simulation simulation(p, _ssbos);
     simulation.spawnBodies();
 
-    int step = 0;
+    _shader_programs[PARTICLE_SHADER].loadUniformFloat("domain_size", 1.0f);
 
     while (_running) {
         _handleEvents();
         _updateDeltaTime();
 
-        if (!paused) {
-            simulation.update();
-        }
-
         _updateCamera();
         _renderFrame();
+
+        if (!paused) {
+            simulation.update();
+            num_octree_nodes = simulation.get_num_octree_nodes();
+        }
     }
 
-    //simulation.writeHistory("output-05.csv");
+    //simulation.writeHistory("output-spin-05.csv");
 }
 
 void Renderer::quit()
@@ -125,11 +128,13 @@ bool Renderer::_init()
 // Loads, compiles and links OpenGL shaders
 bool Renderer::_loadShaders()
 {
-    const std::array<std::string, 4> shaders_filename = {
+    const std::array<std::string, 6> shaders_filename = {
         "shaders/particle.vert",
         "shaders/particle.frag",
         "shaders/cube.vert",
-        "shaders/cube.frag"
+        "shaders/cube.frag",
+        "shaders/octree.vert",
+        "shaders/octree.frag"
     };
 
     bool loaded = true;
@@ -258,16 +263,16 @@ void Renderer::_allocBuffers()
     };
     */
 
-    std::vector<float> dummy;
-    dummy.reserve(N_POINTS);
-    // Creating Shader Storage Buffer Objects to store particles data.
-    for (int i = 0; i < 5; ++i) {
-        glGenBuffers(1, &_particles_ssbo[i]);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, _particles_ssbo[i]);
+    std::vector<double> dummy;
+    dummy.reserve(2 * N_POINTS); // Needed for octree nodes as well
+    // Creating Shader Storage Buffer Objects to store simulation data.
+    for (int i = 0; i < _NUM_SSBOS; ++i) {
+        glGenBuffers(1, &_ssbos[i]);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, _ssbos[i]);
         // Copying particles data to GPU memory to define size
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, _particles_ssbo[i]);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, _ssbos[i]);
         glBufferData(GL_SHADER_STORAGE_BUFFER,
-                     N_POINTS * sizeof(float),
+                     2 * N_POINTS * sizeof(double),
                      dummy.data(),
                      GL_DYNAMIC_DRAW);
     }
@@ -283,8 +288,8 @@ void Renderer::_setupScene()
     glClearColor(0.05f, 0.05f, 0.05f, 0.0f);
     // Enabling transparency
     glEnable(GL_BLEND);
-    //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    //glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     // Enabling depth testing
     // glEnable(GL_DEPTH_TEST);
 
@@ -320,7 +325,7 @@ void Renderer::_handleEvents()
             // Zooming camera
             vec3 zoom_delta({ 0, 0, 0.1f * event.wheel.preciseY });
             // _camera.move(zoom_delta);
-            _camera.orbit({ 0.005f * event.wheel.preciseY, 0, 0 });
+            _camera.orbit({ 0.01f * event.wheel.preciseY, 0, 0 });
         } else if (event.type == SDL_KEYUP &&
                    event.key.keysym.sym == SDLK_SPACE) {
             paused = !paused;
@@ -393,11 +398,14 @@ void Renderer::_renderFrame()
     glBindVertexArray(_quad_vao);
     glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, N_POINTS);
 
-    /*
+    // Drawing octree
+    _shader_programs[OCTREE_SHADER].enable();
+    glBindVertexArray(_cube_vao);
+    glDrawElementsInstanced(GL_LINES, 24, GL_UNSIGNED_INT, 0, num_octree_nodes);
+
     _shader_programs[CUBE_SHADER].enable();
     glBindVertexArray(_cube_vao);
     glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
-    */
 
     SDL_GL_SwapWindow(_window);
 }

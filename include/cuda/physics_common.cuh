@@ -4,9 +4,10 @@
 #include "cuda/soa_vec3.cuh"
 
 // TODO: place in constant memory
-#define GRAVITY 0.001f
-#define SOFTENING_FACTOR 1e-3f
-#define VELOCITY_DAMPENING (1.0f - 0.8236f)
+#define GRAVITY 1.0f
+#define SOFTENING_FACTOR 1e-1f
+#define VELOCITY_DAMPENING 0.001f
+//#define VELOCITY_DAMPENING (1.0f - 0.8236f)
 //#define VELOCITY_DAMPENING (1.0f - 0.8136f) for 2mln
 #define DIST_SCALE 1.0f
 
@@ -60,7 +61,7 @@ void accumulate_pairwise_force(T p1x, T p1y, T p1z,
     T dist_sq = dist_x * dist_x + dist_y * dist_y + dist_z * dist_z;
 
     T inv_den = DIST_SCALE * dist_sq + SOFTENING_FACTOR * SOFTENING_FACTOR;
-    inv_den = __frsqrt_rn(inv_den * inv_den * inv_den);
+    inv_den = 1 / __dsqrt_rn(inv_den * inv_den * inv_den);//__frsqrt_rn(inv_den * inv_den * inv_den);
 
     dst_x += mass * GRAVITY * dist_x * inv_den;
     dst_y += mass * GRAVITY * dist_y * inv_den;
