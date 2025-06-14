@@ -6,7 +6,8 @@
 
 #### Octree visualization
 
-![](octree.png)
+![](spinning.png)
+![](spinning-octree.png)
 
 ## TODO
 
