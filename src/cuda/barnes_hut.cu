@@ -592,6 +592,17 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                             approx_buff_size);
     }
 
+    accumulate_pairwise_force(px,
+                              py,
+                              pz,
+                              (T) 0.5,
+                              (T) 0.5,
+                              (T) 0.5,
+                              (T) 3000000.0,
+                              fx,
+                              fy,
+                              fz);
+
     bodies_acc.x(body_idx) = fx;
     bodies_acc.y(body_idx) = fy;
     bodies_acc.z(body_idx) = fz;

@@ -17,7 +17,7 @@
 #include "ShaderProgram.hpp"
 #include "Simulation.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 18;
+constexpr unsigned int N_POINTS = 2 << 17;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -50,7 +50,7 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    Simulation<float>::Params p = { N_POINTS, 32, 1.0, 0.8, 0.000001 };
+    Simulation<float>::Params p = { N_POINTS, 32, 1.0, 0.5, 0.000001 };
     Simulation<float> simulation(p, _ssbos);
     simulation.spawnBodies();
 
@@ -294,8 +294,8 @@ void Renderer::_setupScene()
     glClearColor(0.05f, 0.05f, 0.05f, 0.0f);
     // Enabling transparency
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    //glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     // Enabling depth testing
     //glEnable(GL_DEPTH_TEST);
 
@@ -408,9 +408,11 @@ void Renderer::_renderFrame()
         glDrawElementsInstanced(GL_LINES, 24, GL_UNSIGNED_INT, 0, num_octree_nodes);
     }
 
+    /*
     _shader_programs[CUBE_SHADER].enable();
     glBindVertexArray(_cube_vao);
     glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
+    */
 
     SDL_GL_SwapWindow(_window);
 }

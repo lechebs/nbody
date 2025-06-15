@@ -9,6 +9,10 @@
 ![](spinning.png)
 ![](spinning-octree.png)
 
+#### 256k bodies
+
+![](disk.png)
+
 ## TODO
 
 - fit octree to bbox

@@ -7,7 +7,7 @@
 
 // TODO: place in constant memory
 #define GRAVITY 1.0f
-#define SOFTENING_FACTOR 1e-2f
+#define SOFTENING_FACTOR 1e-3f
 #define VELOCITY_DAMPENING 0.0f
 //#define VELOCITY_DAMPENING (1.0f - 0.8236f)
 //#define VELOCITY_DAMPENING (1.0f - 0.8136f) for 2mln

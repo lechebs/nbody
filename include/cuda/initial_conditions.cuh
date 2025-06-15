@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include "cuda/soa_vec3.cuh"
+#include "cuda/physics_common.cuh"
 
 template<typename T>
 class InitialConditions
@@ -45,9 +46,9 @@ public:
         resize_buff_(buff, num_bodies);
 
         for (int i = 0; i < num_bodies; ++i) {
-            T r = std::pow(rand_u_(0.0, 1.0), 1.0 / 3.0) * radius;
-            T theta = std::acos(rand_u_(-1.0, 1.0));
-            T phi = rand_u_(0.0, 2 * M_PI);
+            T r = std::pow(rand_u_(0, 1), 1.0 / 3.0) * radius;
+            T theta = std::acos(rand_u_(-1, 1));
+            T phi = rand_u_(0, 2 * M_PI);
 
             buff[0][i] = center_x + r * std::sin(theta) * std::cos(phi);
             buff[1][i] = center_y + r * std::sin(theta) * std::sin(phi);
@@ -58,35 +59,52 @@ public:
         to_dev_(dst, buff, offset);
     }
 
-    /*
-    static void sample_exp_disk(float radius,
-                                float center_x,
-                                float center_y,
-                                float center_z,
-                                bool vertical,
-                                float domain_size,
-                                SoAVec3<T> &dst,
-                                int num_bodies,
-                                int offset = 0)
+    static void sample_disk(float r_min,
+                            float r_max,
+                            float exp,
+                            float center_x,
+                            float center_y,
+                            float center_z,
+                            float domain_size,
+                            SoAVec3<T> &pos_dst,
+                            SoAVec3<T> &vel_dst,
+                            int num_bodies,
+                            int offset = 0)
     {
-        Vec3Buff buff;
-        resize_buff_(buff, num_bodies);
+        Vec3Buff pos_buff;
+        Vec3Buff vel_buff;
+        resize_buff_(pos_buff, num_bodies);
+        resize_buff_(vel_buff, num_bodies);
 
         for (int i = 0; i < num_bodies; ++i) {
-            T r = std::pow(rand_u_(0.0, 1.0), 1.0 / 3.0) * radius;
-            T theta = std::acos(rand_u_(-1.0, 1.0));
-            T phi = rand_u_(0.0, 2 * M_PI);
+            T r = rand_powerlaw_(r_min, r_max, exp);
+            T theta = rand_u_(0, 2 * M_PI);
 
-            buff[0][i] = center_x + r * std::sin(theta) * std::cos(phi);
-            buff[1][i] = center_y + r * std::sin(theta) * std::sin(phi);
-            buff[2][i] = center_z + r * std::cos(theta);
+            pos_buff[0][i] = center_x + r * std::cos(theta);
+            pos_buff[1][i] = center_y + r * std::sin(theta);
+            pos_buff[2][i] = center_z + r * rand_norm_(0, 0.1);
+
+            // Computing circular velocity mass
+
+            T r_pow = std::pow(r, exp + 1);
+            T r_min_pow = std::pow(r_min, exp + 1);
+            T r_max_pow = std::pow(r_max, exp + 1);
+
+            T star_mass = 3000000.0;
+            T disk_mass = num_bodies;
+            T enc_mass = star_mass + disk_mass * (r_pow - r_min_pow) /
+                                                 (r_max_pow - r_min_pow);
+            T vel_kep = std::sqrt(GRAVITY * enc_mass / r);
+
+            vel_buff[0][i] = vel_kep * std::sin(theta);
+            vel_buff[1][i] = -vel_kep * std::cos(theta);
+            vel_buff[2][i] = 0.0;
         }
 
-        clamp_buff_values_(buff, 0, domain_size);
-        to_dev_(dst, buff, offset);
+        clamp_buff_values_(pos_buff, 0, domain_size);
+        to_dev_(pos_dst, pos_buff, offset);
+        to_dev_(vel_dst, vel_buff, offset);
     }
-    */
-
 
 private:
     using Vec3Buff = std::array<std::vector<T>, 3>;
@@ -94,6 +112,24 @@ private:
     static T rand_u_(T min, T max)
     {
         return (T) std::rand() / RAND_MAX * (max - min) + min;
+    }
+
+    static T rand_powerlaw_(T min, T max, T exp)
+    {
+        T max_pow = std::pow(max, exp + 1);
+        T min_pow = std::pow(min, exp + 1);
+
+        return std::pow(rand_u_(0, 1) * (max_pow - min_pow) + min_pow,
+                        1 / (exp + 1));
+    }
+
+    static T rand_norm_(T mean, T std)
+    {
+        // Box-muller trick
+        T r = std::sqrt(-2 * std::log(rand_u_(0, 1)));
+        T theta = rand_u_(0, 2 * M_PI);
+
+        return r * std::cos(theta) * std + mean;
     }
 
     static void resize_buff_(Vec3Buff &buff, int size)

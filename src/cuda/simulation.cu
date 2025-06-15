@@ -164,32 +164,17 @@ void Simulation<T>::spawnBodies()
                                          _impl->points.get_d_pos(),
                                          _params.num_points);
     */
-    InitialConditions<T>::sample_sphere(_params.domain_size * 0.2,
-                                        _params.domain_size / 3,
-                                        _params.domain_size / 3,
-                                        _params.domain_size / 2,
-                                        _params.domain_size,
-                                        _impl->points.get_d_pos(),
-                                        _params.num_points / 3,
-                                        0);
-
-    InitialConditions<T>::sample_sphere(_params.domain_size * 0.2,
-                                        _params.domain_size / 3 * 2,
-                                        _params.domain_size / 2,
-                                        _params.domain_size / 2,
-                                        _params.domain_size,
-                                        _impl->points.get_d_pos(),
-                                        _params.num_points / 3,
-                                        _params.num_points / 3);
-
-    InitialConditions<T>::sample_sphere(_params.domain_size * 0.2,
-                                        _params.domain_size / 3 * 2,
-                                        _params.domain_size / 3 * 2,
-                                        _params.domain_size / 2,
-                                        _params.domain_size,
-                                        _impl->points.get_d_pos(),
-                                        _params.num_points / 3,
-                                        _params.num_points / 3 * 2);
+    InitialConditions<T>::sample_disk(_params.domain_size * 0.05,
+                                      _params.domain_size * 0.3,
+                                      -1.5,
+                                      _params.domain_size / 2,
+                                      _params.domain_size / 2,
+                                      _params.domain_size / 2,
+                                      _params.domain_size,
+                                      _impl->points.get_d_pos(),
+                                      _impl->bh.get_d_vel(),
+                                      _params.num_points,
+                                      0);
 
     //_impl->validator.copy_initial_conditions();
     _impl->updatePoints();
