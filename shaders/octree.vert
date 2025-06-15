@@ -1,10 +1,10 @@
 #version 430 core
 
 layout (location = 0) in vec3 vert_pos;
-layout (std430, binding = 3) readonly buffer BuffX { double barycenters_x[]; };
-layout (std430, binding = 4) readonly buffer BuffY { double barycenters_y[]; };
-layout (std430, binding = 5) readonly buffer BuffZ { double barycenters_z[]; };
-layout (std430, binding = 6) readonly buffer BuffSize { double nodes_size[]; };
+layout (std430, binding = 3) readonly buffer BuffX { FTYPE_ coms_x[]; };
+layout (std430, binding = 4) readonly buffer BuffY { FTYPE_ coms_y[]; };
+layout (std430, binding = 5) readonly buffer BuffZ { FTYPE_ coms_z[]; };
+layout (std430, binding = 6) readonly buffer BuffSize { FTYPE_ size[]; };
 
 uniform mat4 world_to_camera;
 uniform mat4 perspective_projection;
@@ -13,21 +13,17 @@ uniform int max_node_id;
 void main()
 {
     int node_id = gl_InstanceID;
-    double node_size = nodes_size[node_id];
-    /*
-    if (node_size >= 0.25f) {
-        return;
-    }
-    */
+    FTYPE_ node_size = size[node_id];
 
-    double scale = node_size * 0.5;
 
-    double i = floor(double(barycenters_x[node_id]) / node_size);
-    double j = floor(double(barycenters_y[node_id]) / node_size);
-    double k = floor(double(barycenters_z[node_id]) / node_size);
+    float scale = float(node_size * 0.5);
 
-    dvec3 delta = dvec3(i, j, k) * node_size + 
-        dvec3(scale, scale, scale) - dvec3(0.5, 0.5, 0.5);
+    float i = floor(float(coms_x[node_id] / node_size));
+    float j = floor(float(coms_y[node_id] / node_size));
+    float k = floor(float(coms_z[node_id] / node_size));
+
+    vec3 delta = vec3(i, j, k) * float(node_size) +
+        vec3(scale - 0.5f, scale - 0.5f, scale - 0.5f);
 
     vec4 eye_pos = world_to_camera * vec4(vec3(vert_pos * scale + delta), 1.0f);
 

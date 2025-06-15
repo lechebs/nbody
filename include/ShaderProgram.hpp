@@ -16,7 +16,8 @@ public:
     // Loads a shader from file, compiles it and
     // attaches it to the program
     bool loadShader(const std::string &source_path,
-                    GLenum shader_type);
+                    GLenum shader_type,
+                    const std::string &FTYPE_ = "float");
     // Links the shaders attached to the program
     bool link();
     // Enables the program

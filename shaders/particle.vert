@@ -2,9 +2,9 @@
 
 layout (location = 0) in vec3 vert_pos;
 // SSBOs used to gather particles data
-layout (std430, binding = 0) readonly buffer PartX { double particles_x[]; };
-layout (std430, binding = 1) readonly buffer PartY { double particles_y[]; };
-layout (std430, binding = 2) readonly buffer PartZ { double particles_z[]; };
+layout (std430, binding = 0) readonly buffer PartX { FTYPE_ particles_x[]; };
+layout (std430, binding = 1) readonly buffer PartY { FTYPE_ particles_y[]; };
+layout (std430, binding = 2) readonly buffer PartZ { FTYPE_ particles_z[]; };
 
 out vec2 frag_uv;
 out vec4 particle_eye_pos;
@@ -31,7 +31,7 @@ void main()
     particle_world_pos -= vec3(0.5f, 0.5f, 0.5f);
 
     // Determines the size of the particle
-    particle_radius = 0.001;
+    particle_radius = 0.002;
     // Position in camera coordinates
     particle_eye_pos = world_to_camera * vec4(particle_world_pos, 1.0f);
 

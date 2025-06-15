@@ -178,7 +178,7 @@ Validator<T>::Validator(const SoAVec3<T> &pos,
     cudaMalloc(&energy_ap_, num_bodies * sizeof(T));
     cudaMalloc(&acc_err_, num_bodies * sizeof(T));
 
-    tmp_reduce_size_ = 0;
+    tmp_reduce_ = nullptr;
     cub::DeviceReduce::Sum(tmp_reduce_,
                            tmp_reduce_size_,
                            energy_,
@@ -265,8 +265,6 @@ void Validator<T>::update_all_pairs()
                                                       acc_ap_,
                                                       dt_,
                                                       num_bodies_);
-
-
 
     curr_step_ = (curr_step_ + 1) % max_timesteps_;
 }

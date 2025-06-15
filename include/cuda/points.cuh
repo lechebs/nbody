@@ -59,7 +59,6 @@ public:
     Points(int num_points, float domain_size) :
         _num_points(num_points),
         _domain_size(domain_size),
-        _rng(_SEED),
         _gl_buffers(false)
     {
         _pos.alloc(num_points);
@@ -69,7 +68,6 @@ public:
     Points(int num_points, float domain_size, T *x, T *y, T *z) :
         _num_points(num_points),
         _domain_size(domain_size),
-        _rng(_SEED),
         _gl_buffers(true)
     {
         _pos.x() = x;
@@ -267,10 +265,6 @@ private:
         cudaMalloc(&_tmp_scan_pos, _tmp_scan_pos_size);
 
     }
-
-    const static int _SEED = 100;
-
-    thrust::default_random_engine _rng;
 
     // Whether _pos buffers are OpenGL mapped resources
     const bool _gl_buffers;

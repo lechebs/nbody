@@ -15,7 +15,8 @@ void ShaderProgram::create()
 }
 
 bool ShaderProgram::loadShader(const std::string &source_path,
-                               GLenum shader_type)
+                               GLenum shader_type,
+                               const std::string &FTYPE_)
 {
     const GLuint shader = glCreateShader(shader_type);
 
@@ -27,9 +28,13 @@ bool ShaderProgram::loadShader(const std::string &source_path,
     source_file.seekg(0, source_file.beg);
 
     std::string buffer;
-    buffer.reserve(length + 1);
+    buffer.resize(length);
     source_file.read(buffer.data(), length);
     buffer[length] = 0;
+
+    // Inserting FTYPE__ #define
+    buffer.insert(buffer.find_first_of('\n'),
+                  "\n#define FTYPE_ " + FTYPE_);
 
     // Loading shader source code
     char *ptr = buffer.data();

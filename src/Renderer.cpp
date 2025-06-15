@@ -15,14 +15,16 @@
 #include "Vector.hpp"
 #include "Camera.hpp"
 #include "ShaderProgram.hpp"
-#include "CUDAWrappers.hpp"
+#include "Simulation.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 15;
+constexpr unsigned int N_POINTS = 2 << 18;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
 
+// TODO: make member variables
 static bool paused = false;
+static bool draw_octree = false;
 
 Renderer::Renderer(unsigned int window_width,
                    unsigned int window_height) :
@@ -48,8 +50,8 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    CUDAWrappers::Simulation::Params p = { N_POINTS, 32, 1.0, 0.95, 0.000005 };
-    CUDAWrappers::Simulation simulation(p, _ssbos);
+    Simulation<float>::Params p = { N_POINTS, 32, 1.0, 0.8, 0.000001 };
+    Simulation<float> simulation(p, _ssbos);
     simulation.spawnBodies();
 
     _shader_programs[PARTICLE_SHADER].loadUniformFloat("domain_size", 1.0f);
@@ -58,16 +60,18 @@ void Renderer::run()
         _handleEvents();
         _updateDeltaTime();
 
-        _updateCamera();
-        _renderFrame();
-
         if (!paused) {
             simulation.update();
             num_octree_nodes = simulation.get_num_octree_nodes();
         }
+
+        // Octree from previous iteration is drawn
+
+        _updateCamera();
+        _renderFrame();
     }
 
-    //simulation.writeHistory("output-spin-05.csv");
+    //simulation.writeHistory("output-sphere-03.csv");
 }
 
 void Renderer::quit()
@@ -145,9 +149,11 @@ bool Renderer::_loadShaders()
 
         loaded = loaded &
                  _shader_programs[i].loadShader(shaders_filename[2 * i],
-                                                GL_VERTEX_SHADER) &
+                                                GL_VERTEX_SHADER,
+                                                "float") &
                  _shader_programs[i].loadShader(shaders_filename[2 * i + 1],
-                                                GL_FRAGMENT_SHADER) &
+                                                GL_FRAGMENT_SHADER,
+                                                "float") &
                  _shader_programs[i].link();
     }
 
@@ -291,10 +297,10 @@ void Renderer::_setupScene()
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     //glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     // Enabling depth testing
-    // glEnable(GL_DEPTH_TEST);
+    //glEnable(GL_DEPTH_TEST);
 
     //_camera.setPosition({ 0.0f, 0.0f, -1.0f });
-    _camera.setSphericalPosition({ 0.3f, 0.0f, M_PI / 2 });
+    _camera.setSphericalPosition({ 3.0f, 0.0f, M_PI / 2 });
 
     _camera.setOrbitMode(true);
     _camera.setOrbitModeCenter({ 0.0f, 0.0f, 0.0f });
@@ -310,8 +316,6 @@ void Renderer::_setupScene()
 // Handles keyboard and mouse inputs
 void Renderer::_handleEvents()
 {
-    static int curr_node = 0;
-
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         // ESC key press
@@ -329,10 +333,9 @@ void Renderer::_handleEvents()
         } else if (event.type == SDL_KEYUP &&
                    event.key.keysym.sym == SDLK_SPACE) {
             paused = !paused;
-            /*
-            _shader_programs[PARTICLE_SHADER].loadUniformInt(
-                "selected_octree_node", ++curr_node);
-            */
+        } else if (event.type == SDL_KEYUP &&
+                   event.key.keysym.sym == SDLK_o) {
+            draw_octree = !draw_octree;
         }
     }
 
@@ -399,9 +402,11 @@ void Renderer::_renderFrame()
     glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, N_POINTS);
 
     // Drawing octree
-    _shader_programs[OCTREE_SHADER].enable();
-    glBindVertexArray(_cube_vao);
-    glDrawElementsInstanced(GL_LINES, 24, GL_UNSIGNED_INT, 0, num_octree_nodes);
+    if (draw_octree) {
+        _shader_programs[OCTREE_SHADER].enable();
+        glBindVertexArray(_cube_vao);
+        glDrawElementsInstanced(GL_LINES, 24, GL_UNSIGNED_INT, 0, num_octree_nodes);
+    }
 
     _shader_programs[CUBE_SHADER].enable();
     glBindVertexArray(_cube_vao);
