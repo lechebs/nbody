@@ -148,7 +148,7 @@ namespace
             PhysicsCommon<T>::
             accumulate_pairwise_force(p1x, p1y, p1z,
                                       p2x, p2y, p2z,
-                                      (T) 1.0f,
+                                      (T) 1.0f, (T) 1.0f,
                                       fx, fy, fz,
                                       gravity,
                                       softening_factor);

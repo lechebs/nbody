@@ -101,14 +101,17 @@ __device__ __forceinline__ void _append_to_queue(const int *open_buff,
 template<typename T> __device__ __forceinline__
 int _evaluate_approx(const SoAVec3<T> bodies_pos,
                      const SoAVec3<T> nodes_barycenter,
+                     const T *nodes_mass,
                      const int *bodies_begin,
                      const int *bodies_end,
                      T px, T py, T pz,
+                     T m,
                      T &fx, T &fy, T &fz,
                      int *approx_buff,
                      T *x_buff,
                      T *y_buff,
                      T *z_buff,
+                     T *m_buff,
                      int approx_buff_size,
                      const T gravity,
                      const T softening_factor)
@@ -117,9 +120,7 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
 
     if (threadIdx.x < approx_buff_size) {
         int node = approx_buff[start_buff_idx + threadIdx.x];
-        // Reuse buffer to hold cluster mass
-        approx_buff[start_buff_idx + threadIdx.x] =
-            bodies_end[node] - bodies_begin[node] + 1;
+        m_buff[threadIdx.x] = nodes_mass[node];
         x_buff[threadIdx.x] = nodes_barycenter.x(node);
         y_buff[threadIdx.x] = nodes_barycenter.y(node);
         z_buff[threadIdx.x] = nodes_barycenter.z(node);
@@ -138,7 +139,8 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
                                   x_buff[k],
                                   y_buff[k],
                                   z_buff[k],
-                                  (T) approx_buff[start_buff_idx + k],
+                                  m,
+                                  m_buff[k],
                                   fx,
                                   fy,
                                   fz,
@@ -151,15 +153,18 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
 
 template<typename T> __device__ __forceinline__
 void _evaluate_leaf(const SoAVec3<T> bodies_pos,
+                    const T *bodies_mass,
                     const int *bodies_begin,
                     const int *bodies_end,
                     int leaf,
                     T *x_buff,
                     T *y_buff,
                     T *z_buff,
+                    T *m_buff,
                     T px,
                     T py,
                     T pz,
+                    T m,
                     T &fx,
                     T &fy,
                     T &fz,
@@ -177,6 +182,8 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
             x_buff[threadIdx.x] = bodies_pos.x(body_idx);
             y_buff[threadIdx.x] = bodies_pos.y(body_idx);
             z_buff[threadIdx.x] = bodies_pos.z(body_idx);
+            m_buff[threadIdx.x] = bodies_mass[body_idx];
+
         }
         __syncthreads();
 
@@ -192,7 +199,8 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
                                       x_buff[b],
                                       y_buff[b],
                                       z_buff[b],
-                                      (T) 1.0,
+                                      m,
+                                      m_buff[b],
                                       fx,
                                       fy,
                                       fz,
@@ -204,10 +212,12 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
 
 template<typename T>
 __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
+                                     const T *bodies_mass,
                                      SoAVec3<T> bodies_acc,
                                      const SoAOctreeNodes nodes,
                                      const SoAVec3<T> nodes_barycenter,
                                      const T *nodes_size,
+                                     const T *nodes_mass,
                                      const int *bodies_begin,
                                      const int *bodies_end,
                                      const int *codes_first_point_idx,
@@ -242,6 +252,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     __shared__ T x_buff[GROUP_SIZE];
     __shared__ T y_buff[GROUP_SIZE];
     __shared__ T z_buff[GROUP_SIZE];
+    __shared__ T m_buff[GROUP_SIZE];
 
     __shared__ int approx_buff[GROUP_SIZE * 2];
     __shared__ int open_buff[GROUP_SIZE];
@@ -279,6 +290,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     T px = bodies_pos.x(body_idx);
     T py = bodies_pos.y(body_idx);
     T pz = bodies_pos.z(body_idx);
+    T m = bodies_mass[body_idx];
 
     T fx = (T) 0.0f;
     T fy = (T) 0.0f;
@@ -533,15 +545,18 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 while ((src_lane = __fns(leaf_mask, 0, n)) < 32) {
                     int leaf = leaves[src_lane];//__shfl_sync(0xffffffff, node, src_lane);
                     _evaluate_leaf(bodies_pos,
+                                   bodies_mass,
                                    bodies_begin,
                                    bodies_end,
                                    leaf,
                                    x_buff,
                                    y_buff,
                                    z_buff,
+                                   m_buff,
                                    px,
                                    py,
                                    pz,
+                                   m,
                                    fx,
                                    fy,
                                    fz,
@@ -557,11 +572,13 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 n_approx += GROUP_SIZE;
                 approx_buff_size = _evaluate_approx(bodies_pos,
                                                     nodes_barycenter,
+                                                    nodes_mass,
                                                     bodies_begin,
                                                     bodies_end,
                                                     px,
                                                     py,
                                                     pz,
+                                                    m,
                                                     fx,
                                                     fy,
                                                     fz,
@@ -569,6 +586,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                                     x_buff,
                                                     y_buff,
                                                     z_buff,
+                                                    m_buff,
                                                     approx_buff_size,
                                                     gravity,
                                                     softening_factor);
@@ -594,11 +612,13 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
         n_approx += approx_buff_size;
         approx_buff_size = _evaluate_approx(bodies_pos,
                                             nodes_barycenter,
+                                            nodes_mass,
                                             bodies_begin,
                                             bodies_end,
                                             px,
                                             py,
                                             pz,
+                                            m,
                                             fx,
                                             fy,
                                             fz,
@@ -606,30 +626,15 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                             x_buff,
                                             y_buff,
                                             z_buff,
+                                            m_buff,
                                             approx_buff_size,
                                             gravity,
                                             softening_factor);
     }
 
-    /*
-    PhysicsCommon<T>::
-    accumulate_pairwise_force(px,
-                              py,
-                              pz,
-                              (T) 0.5,
-                              (T) 0.5,
-                              (T) 0.5,
-                              (T) 3000000.0,
-                              fx,
-                              fy,
-                              fz,
-                              gravity,
-                              softening_factor);
-    */
-
-    bodies_acc.x(body_idx) = fx;
-    bodies_acc.y(body_idx) = fy;
-    bodies_acc.z(body_idx) = fz;
+    bodies_acc.x(body_idx) = fx / m;
+    bodies_acc.y(body_idx) = fy / m;
+    bodies_acc.z(body_idx) = fz / m;
 
     /*
     if (body_idx == 0) {
@@ -695,11 +700,13 @@ void BarnesHut<T>::solve_pos(const Octree<T> &octree,
 
 template<typename T>
 void BarnesHut<T>::solve_vel(const Octree<T> &octree,
+                             const T *bodies_mass,
                              const int *codes_first_point_idx,
                              const int *leaf_first_code_idx,
                              int num_octree_leaves)
 {
     _compute_forces(octree,
+                    bodies_mass,
                     codes_first_point_idx,
                     leaf_first_code_idx,
                     num_octree_leaves);
@@ -715,6 +722,7 @@ void BarnesHut<T>::solve_vel(const Octree<T> &octree,
 
 template<typename T>
 void BarnesHut<T>::_compute_forces(const Octree<T> &octree,
+                                   const T *bodies_mass,
                                    const int *codes_first_point_idx,
                                    const int *leaf_first_code_idx,
                                    int num_octree_leaves)
@@ -723,10 +731,12 @@ void BarnesHut<T>::_compute_forces(const Octree<T> &octree,
                            (_num_bodies % GROUP_SIZE > 0),
                            GROUP_SIZE>>>
                                 (_pos,
+                                 bodies_mass,
                                  _acc,
                                  octree.get_d_nodes(),
                                  octree.get_d_barycenters(),
                                  octree.get_d_nodes_size(),
+                                 octree.get_d_nodes_mass(),
                                  octree.get_d_points_begin_ptr(),
                                  octree.get_d_points_end_ptr(),
                                  codes_first_point_idx,

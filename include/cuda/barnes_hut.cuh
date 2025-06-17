@@ -36,6 +36,7 @@ public:
                    int num_leaves);
 
     void solve_vel(const Octree<T> &octree,
+                   const T *bodies_mass,
                    const int *codes_first_point_idx,
                    const int *leaf_first_code_idx,
                    int num_leaves);
@@ -44,6 +45,7 @@ public:
 
 private:
     void _compute_forces(const Octree<T> &octree,
+                         const T *bodies_mass,
                          const int *codes_first_point_idx,
                          const int *leaf_first_code_idx,
                          int num_leaves);
@@ -61,6 +63,9 @@ private:
     SoAVec3<T> tmp_vel_;
     SoAVec3<T> tmp_vel_half_;
     SoAVec3<T> tmp_acc_;
+
+    float *mass_;
+    float *tmp_mass_;
 
     int *_queues;
 };

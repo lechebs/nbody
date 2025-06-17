@@ -27,6 +27,11 @@ public:
         return _leaves_end[idx];
     }
 
+    __device__ __forceinline__ int depth(int idx) const
+    {
+        return _depth[idx];
+    }
+
     // Device setters
     __device__ __forceinline__ int &first_child(int idx)
     {
@@ -48,12 +53,18 @@ public:
         return _leaves_end[idx];
     }
 
+    __device__ __forceinline__ int &depth(int idx)
+    {
+        return _depth[idx];
+    }
+
     void alloc(int num_nodes)
     {
         cudaMalloc(&_first_child, num_nodes * sizeof(int));
         cudaMalloc(&_num_children, num_nodes * sizeof(int));
         cudaMalloc(&_leaves_begin, num_nodes * sizeof(int));
         cudaMalloc(&_leaves_end, num_nodes * sizeof(int));
+        cudaMalloc(&_depth, num_nodes * sizeof(int));
     }
 
     void free()
@@ -62,6 +73,7 @@ public:
         cudaFree(_num_children);
         cudaFree(_leaves_begin);
         cudaFree(_leaves_end);
+        cudaFree(_depth);
     }
 
 private:
@@ -72,6 +84,8 @@ private:
     // Arrays to store the range of leaves covered by each node
     int *_leaves_begin;
     int *_leaves_end;
+    // Array to store the depth of each node
+    int *_depth;
 };
 
 #endif

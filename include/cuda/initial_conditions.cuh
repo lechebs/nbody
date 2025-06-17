@@ -60,15 +60,19 @@ public:
         to_dev_(dst, buff, offset);
     }
 
-    static void sample_disk(float r_min,
+    static void sample_disk(float center_mass,
+                            float disk_mass,
+                            float r_min,
                             float r_max,
                             float exp,
                             float center_x,
                             float center_y,
                             float center_z,
                             float domain_size,
+                            float3 vel,
                             SoAVec3<T> &pos_dst,
                             SoAVec3<T> &vel_dst,
+                            T *mass_dst,
                             int num_bodies,
                             int offset = 0)
     {
@@ -77,13 +81,26 @@ public:
         resize_buff_(pos_buff, num_bodies);
         resize_buff_(vel_buff, num_bodies);
 
-        for (int i = 0; i < num_bodies; ++i) {
+        std::vector<T> mass_buff;
+        mass_buff.resize(num_bodies);
+
+        pos_buff[0][0] = center_x;
+        pos_buff[1][0] = center_y;
+        pos_buff[2][0] = center_z;
+
+        vel_buff[0][0] = vel.x;
+        vel_buff[1][0] = vel.y;
+        vel_buff[2][0] = vel.z;
+
+        mass_buff[0] = center_mass;
+
+        for (int i = 1; i < num_bodies; ++i) {
             T r = rand_powerlaw_(r_min, r_max, exp);
             T theta = rand_u_(0, 2 * M_PI);
 
             pos_buff[0][i] = center_x + r * std::cos(theta);
             pos_buff[1][i] = center_y + r * std::sin(theta);
-            pos_buff[2][i] = center_z + r * rand_norm_(0, 0.1);
+            pos_buff[2][i] = center_z + r * rand_norm_(0, 0.01);
 
             // Computing circular velocity mass
 
@@ -91,21 +108,22 @@ public:
             T r_min_pow = std::pow(r_min, exp + 1);
             T r_max_pow = std::pow(r_max, exp + 1);
 
-            T star_mass = 3000000.0;
-            T disk_mass = num_bodies;
-            T enc_mass = star_mass + disk_mass * (r_pow - r_min_pow) /
-                                                 (r_max_pow - r_min_pow);
+            T enc_mass = mass_buff[0] + disk_mass * (r_pow - r_min_pow) /
+                                                    (r_max_pow - r_min_pow);
             T vel_kep = std::sqrt(PhysicsCommon<T>::get_gravity_h() *
                                   enc_mass / r);
 
-            vel_buff[0][i] = vel_kep * std::sin(theta);
-            vel_buff[1][i] = -vel_kep * std::cos(theta);
-            vel_buff[2][i] = 0.0;
+            vel_buff[0][i] = vel_kep * std::sin(theta) + vel.x;
+            vel_buff[1][i] = -vel_kep * std::cos(theta) + vel.y;
+            vel_buff[2][i] = vel.z;
+
+            mass_buff[i] = disk_mass / num_bodies;
         }
 
         clamp_buff_values_(pos_buff, 0, domain_size);
         to_dev_(pos_dst, pos_buff, offset);
         to_dev_(vel_dst, vel_buff, offset);
+        to_dev_(mass_dst, mass_buff, offset);
     }
 
 private:
@@ -159,6 +177,14 @@ private:
                        src[i].size() * sizeof(T),
                        cudaMemcpyHostToDevice);
         }
+    }
+
+    static void to_dev_(T *dst, std::vector<T> &src, int offset = 0)
+    {
+        cudaMemcpy(dst + offset,
+                   src.data(),
+                   src.size() * sizeof(T),
+                   cudaMemcpyHostToDevice);
     }
 };
 

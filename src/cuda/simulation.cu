@@ -90,7 +90,7 @@ struct Simulation<T>::Impl
             points.get_d_codes_first_point_idx_ptr());
         octree.compute_nodes_barycenter(points);
 
-        //octree.print();
+        // octree.print();
     }
 
     void updateBodiesPos()
@@ -104,6 +104,7 @@ struct Simulation<T>::Impl
     void updateBodiesVel()
     {
         bh.solve_vel(octree,
+                     points.get_d_mass(),
                      points.get_d_codes_first_point_idx_ptr(),
                      btree.get_d_leaf_first_code_idx_ptr(),
                      _num_leaves);
@@ -153,22 +154,42 @@ void Simulation<T>::spawnBodies()
 {
     InitialConditions<T>::set_seed(42);
 
+    /*
     InitialConditions<T>::sample_uniform(_params.domain_size,
                                          _impl->points.get_d_pos(),
                                          _params.num_points);
-    /*
-    InitialConditions<T>::sample_disk(_params.domain_size * 0.05,
-                                      _params.domain_size * 0.3,
+    */
+    InitialConditions<T>::sample_disk(40.0,
+                                      10.0,
+                                      0.05,
+                                      0.2,
                                       -1.5,
-                                      _params.domain_size / 2,
-                                      _params.domain_size / 2,
-                                      _params.domain_size / 2,
+                                      5.5,
+                                      5.0,
+                                      5.1,
                                       _params.domain_size,
+                                      { 0, 4.0, 0 },
                                       _impl->points.get_d_pos(),
                                       _impl->bh.get_d_vel(),
-                                      _params.num_points,
+                                      _impl->points.get_d_mass(),
+                                      _params.num_points / 2,
                                       0);
-    */
+
+    InitialConditions<T>::sample_disk(40.0,
+                                      10.0,
+                                      0.05,
+                                      0.20,
+                                      -1.5,
+                                      4.5,
+                                      5.0,
+                                      5.0,
+                                      _params.domain_size,
+                                      { 0, -4.0, 0 },
+                                      _impl->points.get_d_pos(),
+                                      _impl->bh.get_d_vel(),
+                                      _impl->points.get_d_mass(),
+                                      _params.num_points / 2,
+                                      _params.num_points / 2);
 
     //_impl->validator.copy_initial_conditions();
     _impl->updatePoints();
@@ -193,7 +214,6 @@ void Simulation<T>::update()
     _impl->updateOctree(_params.max_num_codes_per_leaf);
     // Solve for velocity
     _impl->updateBodiesVel();
-
 
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);

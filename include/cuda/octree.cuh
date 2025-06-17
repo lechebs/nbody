@@ -32,6 +32,11 @@ public:
         return _nodes_size;
     }
 
+    const T *get_d_nodes_mass() const
+    {
+        return _nodes_mass;
+    }
+
     const SoAVec3<T> get_d_barycenters() const
     {
         return _barycenters;
@@ -119,7 +124,7 @@ public:
             for (int j = 0; j < num_children[i]; ++j) {
                 printf(" %3d", first_child[i] + j);
             }
-            printf("] - (%f, %f, %f) - %3d %3d - %f\n",
+            printf("] - (%f, %f, %f) - %3d %3d - %g\n",
                    x_barycenter[i], y_barycenter[i], z_barycenter[i],
                    leaves_begin[i], leaves_end[i], size[i]);
 
@@ -143,6 +148,8 @@ private:
     SoAOctreeNodes _nodes;
     // Array to store the side length of each octree node
     T *_nodes_size;
+    // Array to store the mass of each octree node
+    T *_nodes_mass;
     // Barycenter coordinates of the points within each node
     SoAVec3<T> _barycenters;
     // Arrays to store the range of points covered by each node

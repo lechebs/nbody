@@ -13,15 +13,18 @@
 
 ![](disk.png)
 
+#### 256k bodies per disk
+
+![](2disks.gif)
+
 ## TODO
 
 - fit octree to bbox
 - revert to 32 sized groups when traversing (apparently faster)
 - quadruple moments
 - switch to trailing underscore for private members, remove leading underscore for private methods
-- refactor initial configuration
 - traversal queue allocation
-- proper double support
+- plummer for accuracy
 
 ## Future work
 

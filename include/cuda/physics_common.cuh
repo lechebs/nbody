@@ -47,7 +47,7 @@ public:
     void accumulate_pairwise_force(
         T p1x, T p1y, T p1z,
         T p2x, T p2y, T p2z,
-        T mass,
+        T m1, T m2,
         T &dst_x, T &dst_y, T &dst_z,
         T gravity,
         T softening_factor)
@@ -68,9 +68,11 @@ public:
             inv_den = 1 / __dsqrt_rn(inv_den * inv_den * inv_den);
         }
 
-        dst_x += mass * gravity * dist_x * inv_den;
-        dst_y += mass * gravity * dist_y * inv_den;
-        dst_z += mass * gravity * dist_z * inv_den;
+        inv_den = inv_den * m1 * m2 * gravity;
+
+        dst_x += dist_x * inv_den;
+        dst_y += dist_y * inv_den;
+        dst_z += dist_z * inv_den;
     }
 
     static __device__

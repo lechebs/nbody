@@ -17,7 +17,7 @@
 #include "ShaderProgram.hpp"
 #include "Simulation.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 16;
+constexpr unsigned int N_POINTS = 2 << 18;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -31,7 +31,7 @@ Renderer::Renderer(unsigned int window_width,
     _window_width(window_width),
     _window_height(window_height),
     _window_title("nbody"),
-    _camera(M_PI / 6,
+    _camera(M_PI / 4,
             static_cast<float>(window_width) / window_height,
             -0.001,
             -20.0) {}
@@ -54,15 +54,17 @@ void Renderer::run()
     p.num_points = N_POINTS;
     p.max_num_codes_per_leaf = 32;
     p.theta = 0.75;
-    p.dt = 1e-6;
+    p.dt = 1e-3;
     p.gravity = 1.0;
     p.softening_factor = 1e-3;
     p.velocity_dampening = 0.0;
-    p.domain_size = 1.0;
+    p.domain_size = 10.0;
     //p.num_steps_validator = 0;
 
     _shader_programs[PARTICLE_SHADER].loadUniformFloat("domain_size",
                                                        p.domain_size);
+    _shader_programs[OCTREE_SHADER].loadUniformFloat("domain_size",
+                                                     p.domain_size);
 
     Simulation<float> simulation(p, _ssbos);
     simulation.spawnBodies();
@@ -310,7 +312,7 @@ void Renderer::_setupScene()
     //glEnable(GL_DEPTH_TEST);
 
     //_camera.setPosition({ 0.0f, 0.0f, -1.0f });
-    _camera.setSphericalPosition({ 3.0f, 0.0f, M_PI / 2 });
+    _camera.setSphericalPosition({ 1.0f, 0.0f, M_PI / 2 });
 
     _camera.setOrbitMode(true);
     _camera.setOrbitModeCenter({ 0.0f, 0.0f, 0.0f });

@@ -3,19 +3,17 @@
 
 #include <iostream>
 
-#include "cuda/utils.cuh"
-#include "cuda/soa_vec3.cuh"
-
 #include <thrust/execution_policy.h>
-#include <thrust/device_ptr.h>
-#include <thrust/host_vector.h>
-#include <thrust/generate.h>
-#include <thrust/random.h>
 #include <thrust/sequence.h>
+#include <thrust/gather.h>
+#include <thrust/fill.h>
 
 #include <cub/device/device_merge_sort.cuh>
 #include <cub/device/device_partition.cuh>
 #include <cub/device/device_run_length_encode.cuh>
+
+#include "cuda/utils.cuh"
+#include "cuda/soa_vec3.cuh"
 
 __device__ __forceinline__ morton_t _expand_bits(morton_t u)
 {
@@ -51,6 +49,24 @@ template<typename T> __global__ void _morton_encode(const SoAVec3<T> pos,
 
     // Left shift x by 2 bits, y by 1 bit, then bitwise or
     codes[idx] = x * 4 + y * 2 + z;
+}
+
+template<typename T> __global__
+void compute_weighted_pos(const SoAVec3<T> pos,
+                          const T *mass,
+                          SoAVec3<T> weighted_pos,
+                          int num_points)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= num_points) {
+        return;
+    }
+
+    T m = mass[idx];
+
+    weighted_pos.x(idx) = pos.x(idx) * m;
+    weighted_pos.y(idx) = pos.y(idx) * m;
+    weighted_pos.z(idx) = pos.z(idx) * m;
 }
 
 template<typename T> class Points
@@ -96,9 +112,29 @@ public:
         return _pos;
     }
 
-    const SoAVec3<T> &get_d_scan_pos() const
+    const SoAVec3<T> &get_d_weighted_pos() const
     {
-        return _scan_pos;
+        return _weighted_pos;
+    }
+
+    const SoAVec3<T> &get_d_scan_weighted_pos() const
+    {
+        return _scan_weighted_pos;
+    }
+
+    T *get_d_mass()
+    {
+        return mass_;
+    }
+
+    const T *get_d_mass() const
+    {
+        return mass_;
+    }
+
+    const T *get_d_scan_mass() const
+    {
+        return scan_mass_;
     }
 
     const int *get_d_sort_indices_ptr() const
@@ -130,6 +166,12 @@ public:
 
         _tmp_pos.gather(_pos, _range, _num_points);
 
+        thrust::gather(thrust::device,
+                       _range,
+                       _range + _num_points,
+                       mass_,
+                       tmp_mass_);
+
         if (_gl_buffers) {
             // Copying back to original buffer since it's where
             // OpenGL expects to read the particles data
@@ -148,6 +190,8 @@ public:
         } else {
             _pos.swap(_tmp_pos);
         }
+
+        swap_ptr(&mass_, &tmp_mass_);
     }
 
     void compute_unique_codes(int *d_num_unique_codes)
@@ -174,23 +218,39 @@ public:
                                       _codes_first_point_idx,
                                       _num_points + 1);
 
+        /*
+        // Scan mass array
+        cub::DeviceScan::ExclusiveSum(_tmp_scan_mass,
+                                      _tmp_scan_mass_size,
+                                      mass_,
+                                      scan_mass_,
+                                      _num_points);
+
+        compute_weighted_pos<<<_num_points / MAX_THREADS_PER_BLOCK +
+                               (_num_points % MAX_THREADS_PER_BLOCK > 0),
+                               MAX_THREADS_PER_BLOCK>>>(_pos,
+                                                        mass_,
+                                                        _weighted_pos,
+                                                        _num_points);
+
         // Scan coordinates to later compute the barycenter
         // of the octree nodes
-        cub::DeviceScan::ExclusiveSum(_tmp_scan_pos,
-                                      _tmp_scan_pos_size,
-                                      _pos.x(),
-                                      _scan_pos.x(),
+        cub::DeviceScan::ExclusiveSum(_tmp_scan_mass,
+                                      _tmp_scan_mass_size,
+                                      _weighted_pos.x(),
+                                      _scan_weighted_pos.x(),
                                       _num_points);
-        cub::DeviceScan::ExclusiveSum(_tmp_scan_pos,
-                                      _tmp_scan_pos_size,
-                                      _pos.y(),
-                                      _scan_pos.y(),
+        cub::DeviceScan::ExclusiveSum(_tmp_scan_mass,
+                                      _tmp_scan_mass_size,
+                                      _weighted_pos.y(),
+                                      _scan_weighted_pos.y(),
                                       _num_points);
-        cub::DeviceScan::ExclusiveSum(_tmp_scan_pos,
-                                      _tmp_scan_pos_size,
-                                      _pos.z(),
-                                      _scan_pos.z(),
+        cub::DeviceScan::ExclusiveSum(_tmp_scan_mass,
+                                      _tmp_scan_mass_size,
+                                      _weighted_pos.z(),
+                                      _scan_weighted_pos.z(),
                                       _num_points);
+        */
     }
 
     ~Points()
@@ -199,7 +259,12 @@ public:
             _pos.free();
         }
         _tmp_pos.free();
-        _scan_pos.free();
+        _weighted_pos.free();
+        _scan_weighted_pos.free();
+
+        cudaFree(mass_);
+        cudaFree(tmp_mass_);
+        cudaFree(scan_mass_);
 
         cudaFree(_codes);
         cudaFree(_unique_codes);
@@ -211,14 +276,21 @@ public:
         cudaFree(_tmp_sort);
         cudaFree(_tmp_runlength);
         cudaFree(_tmp_scan);
-        cudaFree(_tmp_scan_pos);
+        cudaFree(_tmp_scan_mass);
+        cudaFree(_tmp_scan_weighted_pos);
     }
 
 private:
     void _init(int num_points)
     {
         _tmp_pos.alloc(num_points);
-        _scan_pos.alloc(num_points);
+        _weighted_pos.alloc(num_points);
+        _scan_weighted_pos.alloc(num_points);
+
+        cudaMalloc(&mass_, num_points * sizeof(T));
+        cudaMalloc(&tmp_mass_, num_points * sizeof(T));
+        thrust::fill(thrust::device, mass_, mass_ + num_points, (T) 1.0);
+        cudaMalloc(&scan_mass_, num_points * sizeof(T));
 
         cudaMalloc(&_codes, num_points * sizeof(morton_t));
         cudaMalloc(&_unique_codes, num_points * sizeof(morton_t));
@@ -256,14 +328,14 @@ private:
                                       num_points);
         cudaMalloc(&_tmp_scan, _tmp_scan_size);
 
-        _tmp_scan_pos = nullptr;
-        cub::DeviceScan::ExclusiveSum(_tmp_scan_pos,
-                                      _tmp_scan_pos_size,
-                                      _pos.x(),
-                                      _scan_pos.x(),
+        _tmp_scan_mass = nullptr;
+        cub::DeviceScan::ExclusiveSum(_tmp_scan_mass,
+                                      _tmp_scan_mass_size,
+                                      mass_,
+                                      scan_mass_,
                                       num_points);
-        cudaMalloc(&_tmp_scan_pos, _tmp_scan_pos_size);
-
+        cudaMalloc(&_tmp_scan_mass, _tmp_scan_mass_size);
+        cudaMalloc(&_tmp_scan_weighted_pos, _tmp_scan_mass_size);
     }
 
     // Whether _pos buffers are OpenGL mapped resources
@@ -274,7 +346,12 @@ private:
 
     SoAVec3<T> _pos;
     SoAVec3<T> _tmp_pos;
-    SoAVec3<T> _scan_pos;
+    SoAVec3<T> _weighted_pos;
+    SoAVec3<T> _scan_weighted_pos;
+
+    T *mass_;
+    T *tmp_mass_;
+    T *scan_mass_;
 
     morton_t *_codes;
     morton_t *_unique_codes;
@@ -293,8 +370,9 @@ private:
     int *_tmp_scan;
     size_t _tmp_scan_size;
 
-    T *_tmp_scan_pos;
-    size_t _tmp_scan_pos_size;
+    T *_tmp_scan_mass;
+    T *_tmp_scan_weighted_pos;
+    size_t _tmp_scan_mass_size;
 };
 
 #endif
