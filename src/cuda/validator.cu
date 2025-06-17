@@ -25,9 +25,9 @@ namespace
     }
 
     template<typename T>
-    __device__ __inline__ T compute_pairwise_potential_energy(T dist_sq)
+    __device__ __inline__ T compute_pairwise_potential_energy(T dist_sq, T gravity)
     {
-        return -0.5f * GRAVITY * __frsqrt_rn(dist_sq);
+        return -0.5f * gravity * __frsqrt_rn(dist_sq);
     }
 
     template<typename T>
@@ -49,8 +49,8 @@ namespace
         T ay_ap = acc_ap.y(idx);
         T az_ap = acc_ap.z(idx);
 
-        // WARNING: requires acc_ap to be sorted as acc
-        T dist_sq = compute_dist_sq(ax, ay, az, ax_ap, ay_ap, az_ap);
+        T dist_sq = PhysicsCommon<T>::
+                    compute_dist_sq(ax, ay, az, ax_ap, ay_ap, az_ap);
 
         acc_err[idx] = __fsqrt_rn(dist_sq) * __frsqrt_rn(ax_ap * ax_ap +
                                                          ay_ap * ay_ap +
@@ -87,6 +87,8 @@ namespace
         T fy = 0.0f;
         T fz = 0.0f;
 
+        T gravity = PhysicsCommon<T>::get_gravity();
+
     #pragma unroll 32
         for (int i = 0; i < num_bodies; ++i) {
             if (idx != i) {
@@ -95,16 +97,19 @@ namespace
                 T p2y_ap = pos_ap.y(i);
                 T p2z_ap = pos_ap.z(i);
 
-                T dist_sq_ap = compute_dist_sq(p1x_ap, p1y_ap, p1z_ap,
+                T dist_sq_ap = PhysicsCommon<T>::
+                               compute_dist_sq(p1x_ap, p1y_ap, p1z_ap,
                                                p2x_ap, p2y_ap, p2z_ap);
                 body_energy_ap +=
-                    compute_pairwise_potential_energy(dist_sq_ap);
+                    compute_pairwise_potential_energy(dist_sq_ap, gravity);
 
                 T p2x = pos.x(i);
                 T p2y = pos.y(i);
                 T p2z = pos.z(i);
-                T dist_sq = compute_dist_sq(p1x, p1y, p1z, p2x, p2y, p2z);
-                body_energy += compute_pairwise_potential_energy(dist_sq);
+                T dist_sq = PhysicsCommon<T>::
+                            compute_dist_sq(p1x, p1y, p1z, p2x, p2y, p2z);
+                body_energy += compute_pairwise_potential_energy(dist_sq,
+                                                                 gravity);
             }
         }
 
@@ -130,6 +135,9 @@ namespace
         T fy = 0.0f;
         T fz = 0.0f;
 
+        T gravity = PhysicsCommon<T>::get_gravity();
+        T softening_factor = PhysicsCommon<T>::get_softening_factor();
+
     #pragma unroll 32
         for (int i = 0; i < num_bodies; ++i) {
 
@@ -137,10 +145,13 @@ namespace
             T p2y = pos_ap.y(i);
             T p2z = pos_ap.z(i);
 
+            PhysicsCommon<T>::
             accumulate_pairwise_force(p1x, p1y, p1z,
                                       p2x, p2y, p2z,
                                       (T) 1.0f,
-                                      fx, fy, fz);
+                                      fx, fy, fz,
+                                      gravity,
+                                      softening_factor);
         }
 
         acc_ap.x(idx) = fx;

@@ -15,9 +15,13 @@ public:
     {
         int num_points;
         int max_num_codes_per_leaf;
-        float domain_size;
         float theta;
         float dt;
+        float gravity;
+        float softening_factor;
+        float domain_size;
+        float velocity_dampening;
+        int num_steps_validator;
     };
 
     Simulation(Params &params);

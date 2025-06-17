@@ -10,7 +10,7 @@ NVCC = nvcc
 NVCCFLAGS = -arch=compute_89 -code=sm_89 -maxrregcount=40
 
 EXE = main
-CUDA_OBJS = btree.o octree.o barnes_hut.o wrappers.o validator.o
+CUDA_OBJS = btree.o octree.o physics_common.o barnes_hut.o simulation.o validator.o
 OBJS = main.o Renderer.o ShaderProgram.o Camera.o $(CUDA_OBJS)
 
 all: $(BUILD_DIR) $(EXE)

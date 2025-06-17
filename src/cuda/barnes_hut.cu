@@ -43,11 +43,13 @@ T _compute_group_to_node_min_dist(const T *x_group,
                                   T z_node)
 {
     // WARNING: coordinates are within the unit cube
-    T min_dist_sq = (T) 3.0f;
+    T domain_size = PhysicsCommon<T>::get_domain_size();
+    T min_dist_sq = domain_size * domain_size * (T) 3.0;
 
     #pragma unroll
     for (int i = 0; i < GROUP_SIZE; ++i) {
-        T dist_sq = compute_dist_sq(x_group[i], y_group[i], z_group[i],
+        T dist_sq = PhysicsCommon<T>::
+                    compute_dist_sq(x_group[i], y_group[i], z_group[i],
                                     x_node, y_node, z_node);
 
         if (dist_sq <= min_dist_sq) {
@@ -107,7 +109,9 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
                      T *x_buff,
                      T *y_buff,
                      T *z_buff,
-                     int approx_buff_size)
+                     int approx_buff_size,
+                     const T gravity,
+                     const T softening_factor)
 {
     int start_buff_idx = max(0, approx_buff_size - GROUP_SIZE);
 
@@ -127,6 +131,7 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
     // #pragma unroll
     // TODO: try unrolling
     for (int k = 0; k < chunk_size; ++k) {
+        PhysicsCommon<T>::
         accumulate_pairwise_force(px,
                                   py,
                                   pz,
@@ -136,7 +141,9 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
                                   (T) approx_buff[start_buff_idx + k],
                                   fx,
                                   fy,
-                                  fz);
+                                  fz,
+                                  gravity,
+                                  softening_factor);
     }
 
     return start_buff_idx;
@@ -156,7 +163,8 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
                     T &fx,
                     T &fy,
                     T &fz,
-                    int &n_p2p)
+                    const T gravity,
+                    const T softening_factor)
 {
     int leaf_first_body = bodies_begin[leaf];
     int leaf_num_bodies = bodies_end[leaf] - leaf_first_body + 1;
@@ -176,7 +184,8 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
         // #pragma unroll
         // TODO: try unrolling when possible
         for (int b = 0; b < chunk_size; ++b) {
-            n_p2p++;
+
+            PhysicsCommon<T>::
             accumulate_pairwise_force(px,
                                       py,
                                       pz,
@@ -186,7 +195,9 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
                                       (T) 1.0,
                                       fx,
                                       fy,
-                                      fz);
+                                      fz,
+                                      gravity,
+                                      softening_factor);
         }
     }
 }
@@ -262,8 +273,6 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     int n_approx = 0;
     int n_leaves = 0;
 
-    int n_p2p = 0;
-
     int lane_idx = threadIdx.x % WARP_SIZE;
     int warp_idx = threadIdx.x / WARP_SIZE;
 
@@ -275,9 +284,14 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     T fy = (T) 0.0f;
     T fz = (T) 0.0f;
 
+    __shared__ T gravity;
+    __shared__ T softening_factor;
+
     if (threadIdx.x == 0) {
         // TODO: prefill with nodes from lower levels
         queue[0] = 0;
+        gravity = PhysicsCommon<T>::get_gravity();
+        softening_factor = PhysicsCommon<T>::get_softening_factor();
     }
 
     while (queue_size > 0) {
@@ -531,7 +545,8 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                    fx,
                                    fy,
                                    fz,
-                                   n_p2p);
+                                   gravity,
+                                   softening_factor);
                     n++;
                     n_leaves++;
                 }
@@ -554,7 +569,9 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                                     x_buff,
                                                     y_buff,
                                                     z_buff,
-                                                    approx_buff_size);
+                                                    approx_buff_size,
+                                                    gravity,
+                                                    softening_factor);
             }
 
             // Shouldn't be strictly needed here
@@ -589,9 +606,13 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                             x_buff,
                                             y_buff,
                                             z_buff,
-                                            approx_buff_size);
+                                            approx_buff_size,
+                                            gravity,
+                                            softening_factor);
     }
 
+    /*
+    PhysicsCommon<T>::
     accumulate_pairwise_force(px,
                               py,
                               pz,
@@ -601,7 +622,10 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                               (T) 3000000.0,
                               fx,
                               fy,
-                              fz);
+                              fz,
+                              gravity,
+                              softening_factor);
+    */
 
     bodies_acc.x(body_idx) = fx;
     bodies_acc.y(body_idx) = fy;

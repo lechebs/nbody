@@ -16,44 +16,46 @@ template<typename T>
 template<typename U>
 struct Simulation<T>::Impl
 {
-    Impl(int num_points, float domain_size, float theta, float dt) :
-        points(num_points, domain_size),
-        btree(num_points),
-        octree(num_points, domain_size),
-        bh(points.get_d_pos(), num_points, theta, dt),
+    Impl(const Simulation<T>::Params &params) :
+        points(params.num_points, params.domain_size),
+        btree(params.num_points),
+        octree(params.num_points, params.domain_size),
+        bh(points.get_d_pos(), params.num_points, params.theta, params.dt),
         validator(points.get_d_pos(),
                   bh.get_d_vel(),
                   bh.get_d_acc(),
                   points.get_d_sort_indices_ptr(),
-                  num_points,
-                  dt,
-                  5000) {}
+                  params.num_points,
+                  params.dt,
+                  params.num_steps_validator) {}
 
-    Impl(int num_points,
-         float domain_size,
-         float theta,
-         float dt,
-         void *mapped_ptrs[7]) :
-        points(num_points,
-               domain_size,
+    Impl(const Simulation<T>::Params &params, void *mapped_ptrs[7]) :
+        points(params.num_points,
+               params.domain_size,
                static_cast<U *>(mapped_ptrs[0]),
                static_cast<U *>(mapped_ptrs[1]),
                static_cast<U *>(mapped_ptrs[2])),
-        btree(num_points),
-        octree(num_points,
-               domain_size,
+        btree(params.num_points),
+        octree(params.num_points,
+               params.domain_size,
                static_cast<U *>(mapped_ptrs[3]),
                static_cast<U *>(mapped_ptrs[4]),
                static_cast<U *>(mapped_ptrs[5]),
                static_cast<U *>(mapped_ptrs[6])),
-        bh(points.get_d_pos(), num_points, theta, dt),
+        bh(points.get_d_pos(), params.num_points, params.theta, params.dt),
         validator(points.get_d_pos(),
                   bh.get_d_vel(),
                   bh.get_d_acc(),
                   points.get_d_sort_indices_ptr(),
-                  num_points,
-                  dt,
-                  5000) {}
+                  params.num_points,
+                  params.dt,
+                  params.num_steps_validator)
+    {
+        PhysicsCommon<U>::set_params(params.gravity,
+                                     params.softening_factor,
+                                     params.velocity_dampening,
+                                     params.domain_size);
+    }
 
     void updatePoints()
     {
@@ -121,10 +123,7 @@ template<typename T>
 Simulation<T>::Simulation(Simulation<T>::Params &params) :
     _params(params)
 {
-    _impl = std::make_unique<Simulation::Impl<T>>(params.num_points,
-                                                  params.domain_size,
-                                                  params.theta,
-                                                  params.dt);
+    _impl = std::make_unique<Simulation::Impl<T>>(params);
 }
 
 template<typename T>
@@ -145,25 +144,19 @@ Simulation<T>::Simulation(Simulation<T>::Params &params, GLuint buffers[7]) :
         cudaGraphicsResourceGetMappedPointer(&mapped_ptrs[i], &size, res);
     }
 
-    _impl = std::make_unique<Simulation::Impl<T>>(params.num_points,
-                                                  params.domain_size,
-                                                  params.theta,
-                                                  params.dt,
+    _impl = std::make_unique<Simulation::Impl<T>>(params,
                                                   mapped_ptrs);
 }
 
 template<typename T>
 void Simulation<T>::spawnBodies()
 {
-    //_impl->spawnBodies();
-
     InitialConditions<T>::set_seed(42);
 
-    /*
     InitialConditions<T>::sample_uniform(_params.domain_size,
                                          _impl->points.get_d_pos(),
                                          _params.num_points);
-    */
+    /*
     InitialConditions<T>::sample_disk(_params.domain_size * 0.05,
                                       _params.domain_size * 0.3,
                                       -1.5,
@@ -175,6 +168,7 @@ void Simulation<T>::spawnBodies()
                                       _impl->bh.get_d_vel(),
                                       _params.num_points,
                                       0);
+    */
 
     //_impl->validator.copy_initial_conditions();
     _impl->updatePoints();

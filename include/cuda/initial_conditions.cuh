@@ -26,11 +26,12 @@ public:
 
         for (int i = 0; i < 3; ++i) {
             for (int j = 0; j < num_bodies; ++j) {
-                buff[i][j] = rand_u_(0, domain_size);
+                buff[i][j] = rand_u_(0.01, domain_size - 0.01);
             }
         }
 
-        to_dev_(dst, buff);
+        clamp_buff_values_(buff, 0, domain_size);
+        to_dev_(dst, buff, 0);
     }
 
     static void sample_sphere(float radius,
@@ -94,7 +95,8 @@ public:
             T disk_mass = num_bodies;
             T enc_mass = star_mass + disk_mass * (r_pow - r_min_pow) /
                                                  (r_max_pow - r_min_pow);
-            T vel_kep = std::sqrt(GRAVITY * enc_mass / r);
+            T vel_kep = std::sqrt(PhysicsCommon<T>::get_gravity_h() *
+                                  enc_mass / r);
 
             vel_buff[0][i] = vel_kep * std::sin(theta);
             vel_buff[1][i] = -vel_kep * std::cos(theta);

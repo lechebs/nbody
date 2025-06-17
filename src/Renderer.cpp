@@ -17,7 +17,7 @@
 #include "ShaderProgram.hpp"
 #include "Simulation.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 17;
+constexpr unsigned int N_POINTS = 2 << 16;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -50,12 +50,22 @@ void Renderer::run()
     _allocBuffers();
     _setupScene();
 
-    Simulation<float>::Params p = { N_POINTS, 32, 1.0, 0.5, 0.000001 };
+    Simulation<float>::Params p;
+    p.num_points = N_POINTS;
+    p.max_num_codes_per_leaf = 32;
+    p.theta = 0.75;
+    p.dt = 1e-6;
+    p.gravity = 1.0;
+    p.softening_factor = 1e-3;
+    p.velocity_dampening = 0.0;
+    p.domain_size = 1.0;
+    //p.num_steps_validator = 0;
+
+    _shader_programs[PARTICLE_SHADER].loadUniformFloat("domain_size",
+                                                       p.domain_size);
+
     Simulation<float> simulation(p, _ssbos);
     simulation.spawnBodies();
-
-    _shader_programs[PARTICLE_SHADER].loadUniformFloat("domain_size", 1.0f);
-
     while (_running) {
         _handleEvents();
         _updateDeltaTime();
