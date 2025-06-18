@@ -7,6 +7,9 @@
 
 #include <cub/device/device_reduce.cuh>
 
+#include <thrust/execution_policy.h>
+#include <thrust/gather.h>
+
 #include "cuda/soa_vec3.cuh"
 #include "cuda/utils.cuh"
 #include "cuda/physics_common.cuh"
@@ -24,10 +27,12 @@ namespace
         return 0.5f * (vx * vx + vy * vy + vz * vz);
     }
 
-    template<typename T>
-    __device__ __inline__ T compute_pairwise_potential_energy(T dist_sq, T gravity)
+    template<typename T> __device__ __inline__
+    T compute_pairwise_potential_energy(T dist_sq,
+                                        T gravity,
+                                        T softening_factor_sq)
     {
-        return -0.5f * gravity * __frsqrt_rn(dist_sq);
+        return -0.5f * gravity * __frsqrt_rn(dist_sq + softening_factor_sq);
     }
 
     template<typename T>
@@ -60,6 +65,7 @@ namespace
     template<typename T> __global__ void
     compute_conserved_quantities(const SoAVec3<T> pos,
                                  const SoAVec3<T> vel,
+                                 const T *mass,
                                  const SoAVec3<T> pos_ap,
                                  const SoAVec3<T> vel_ap,
                                  T *energy,
@@ -88,10 +94,13 @@ namespace
         T fz = 0.0f;
 
         T gravity = PhysicsCommon<T>::get_gravity();
+        T softening_factor_sq = PhysicsCommon<T>::get_softening_factor_sq();
 
     #pragma unroll 32
         for (int i = 0; i < num_bodies; ++i) {
             if (idx != i) {
+
+                T m2 = mass[i];
 
                 T p2x_ap = pos_ap.x(i);
                 T p2y_ap = pos_ap.y(i);
@@ -100,25 +109,31 @@ namespace
                 T dist_sq_ap = PhysicsCommon<T>::
                                compute_dist_sq(p1x_ap, p1y_ap, p1z_ap,
                                                p2x_ap, p2y_ap, p2z_ap);
-                body_energy_ap +=
-                    compute_pairwise_potential_energy(dist_sq_ap, gravity);
+                body_energy_ap += m2 *
+                    compute_pairwise_potential_energy(dist_sq_ap,
+                                                      gravity,
+                                                      softening_factor_sq);
 
                 T p2x = pos.x(i);
                 T p2y = pos.y(i);
                 T p2z = pos.z(i);
                 T dist_sq = PhysicsCommon<T>::
                             compute_dist_sq(p1x, p1y, p1z, p2x, p2y, p2z);
-                body_energy += compute_pairwise_potential_energy(dist_sq,
-                                                                 gravity);
+                body_energy += m2 *
+                    compute_pairwise_potential_energy(dist_sq,
+                                                      gravity,
+                                                      softening_factor_sq);
             }
         }
 
-        energy[idx] = body_energy;
-        energy_ap[idx] = body_energy_ap;
+        T m = mass[idx];
+        energy[idx] = body_energy * m;
+        energy_ap[idx] = body_energy_ap * m;
     }
 
     template<typename T>
     __global__ void compute_ap_forces(const SoAVec3<T> pos_ap,
+                                      const T *mass,
                                       SoAVec3<T> acc_ap,
                                       int num_bodies)
     {
@@ -135,8 +150,7 @@ namespace
         T fy = 0.0f;
         T fz = 0.0f;
 
-        T gravity = PhysicsCommon<T>::get_gravity();
-        T softening_factor = PhysicsCommon<T>::get_softening_factor();
+        T softening_factor_sq = PhysicsCommon<T>::get_softening_factor_sq();
 
     #pragma unroll 32
         for (int i = 0; i < num_bodies; ++i) {
@@ -148,15 +162,15 @@ namespace
             PhysicsCommon<T>::
             accumulate_pairwise_force(p1x, p1y, p1z,
                                       p2x, p2y, p2z,
-                                      (T) 1.0f, (T) 1.0f,
+                                      mass[i],
                                       fx, fy, fz,
-                                      gravity,
-                                      softening_factor);
+                                      softening_factor_sq);
         }
 
-        acc_ap.x(idx) = fx;
-        acc_ap.y(idx) = fy;
-        acc_ap.z(idx) = fz;
+        T gravity = PhysicsCommon<T>::get_gravity();
+        acc_ap.x(idx) = gravity * fx;
+        acc_ap.y(idx) = gravity * fy;
+        acc_ap.z(idx) = gravity * fz;
     }
 }
 
@@ -164,6 +178,7 @@ template<typename T>
 Validator<T>::Validator(const SoAVec3<T> &pos,
                         const SoAVec3<T> &vel,
                         const SoAVec3<T> &acc,
+                        const T *mass,
                         const int *d_sort_indices,
                         int num_bodies,
                         float dt,
@@ -171,6 +186,7 @@ Validator<T>::Validator(const SoAVec3<T> &pos,
     pos_(pos),
     vel_(vel),
     acc_(acc),
+    mass_(mass),
     sort_indices_(d_sort_indices),
     num_bodies_(num_bodies),
     dt_(dt),
@@ -184,6 +200,9 @@ Validator<T>::Validator(const SoAVec3<T> &pos,
     tmp_pos_ap_.alloc(num_bodies);
     tmp_vel_ap_.alloc(num_bodies);
     tmp_acc_ap_.alloc(num_bodies);
+
+    cudaMalloc(&mass_ap_, num_bodies * sizeof(T));
+    cudaMalloc(&tmp_mass_ap_, num_bodies * sizeof(T));
 
     cudaMalloc(&energy_, num_bodies * sizeof(T));
     cudaMalloc(&energy_ap_, num_bodies * sizeof(T));
@@ -210,6 +229,10 @@ void Validator<T>::copy_initial_conditions()
     pos_ap_.copy(pos_, num_bodies_);
     vel_ap_.copy(vel_, num_bodies_);
     acc_ap_.copy(acc_, num_bodies_);
+    cudaMemcpy(mass_ap_,
+               mass_,
+               num_bodies_ * sizeof(T),
+               cudaMemcpyDeviceToDevice);
 }
 
 template<typename T>
@@ -220,10 +243,16 @@ void Validator<T>::update_all_pairs()
     tmp_pos_ap_.gather(pos_ap_, sort_indices_, num_bodies_);
     tmp_vel_ap_.gather(vel_ap_, sort_indices_, num_bodies_);
     tmp_acc_ap_.gather(acc_ap_, sort_indices_, num_bodies_);
+    thrust::gather(thrust::device,
+                   sort_indices_,
+                   sort_indices_ + num_bodies_,
+                   mass_ap_,
+                   tmp_mass_ap_);
 
     pos_ap_.swap(tmp_pos_ap_);
     vel_ap_.swap(tmp_vel_ap_);
     acc_ap_.swap(tmp_acc_ap_);
+    swap_ptr(&mass_ap_, &tmp_mass_ap_);
 
     compute_acc_error<<<num_blocks, MAX_THREADS_PER_BLOCK>>>(acc_,
                                                              acc_ap_,
@@ -238,6 +267,7 @@ void Validator<T>::update_all_pairs()
     compute_conserved_quantities<<<num_blocks,
                                    MAX_THREADS_PER_BLOCK>>>(pos_,
                                                             vel_,
+                                                            mass_ap_,
                                                             pos_ap_,
                                                             vel_ap_,
                                                             energy_,
@@ -256,6 +286,10 @@ void Validator<T>::update_all_pairs()
                            sys_energy_ap_ + curr_step_,
                            num_bodies_);
 
+    pos_ap_.copy(pos_, num_bodies_);
+    vel_ap_.copy(vel_, num_bodies_);
+    acc_ap_.copy(acc_, num_bodies_);
+
     // Solving for all-pairs pos
     leapfrog_integrate_pos<<<num_blocks,
                              MAX_THREADS_PER_BLOCK>>>(pos_ap_,
@@ -267,6 +301,7 @@ void Validator<T>::update_all_pairs()
     // Computing all-pairs forces
     compute_ap_forces<<<num_blocks,
                         MAX_THREADS_PER_BLOCK>>>(pos_ap_,
+                                                 mass_ap_,
                                                  acc_ap_,
                                                  num_bodies_);
     // Solving for all-pairs vel
@@ -323,6 +358,9 @@ Validator<T>::~Validator()
     tmp_pos_ap_.free();
     tmp_vel_ap_.free();
     tmp_acc_ap_.free();
+
+    cudaFree(mass_ap_);
+    cudaFree(tmp_mass_ap_);
 
     cudaFree(energy_);
     cudaFree(energy_ap_);

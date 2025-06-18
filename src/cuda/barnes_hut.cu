@@ -105,7 +105,6 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
                      const int *bodies_begin,
                      const int *bodies_end,
                      T px, T py, T pz,
-                     T m,
                      T &fx, T &fy, T &fz,
                      int *approx_buff,
                      T *x_buff,
@@ -113,8 +112,7 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
                      T *z_buff,
                      T *m_buff,
                      int approx_buff_size,
-                     const T gravity,
-                     const T softening_factor)
+                     const T softening_factor_sq)
 {
     int start_buff_idx = max(0, approx_buff_size - GROUP_SIZE);
 
@@ -139,13 +137,11 @@ int _evaluate_approx(const SoAVec3<T> bodies_pos,
                                   x_buff[k],
                                   y_buff[k],
                                   z_buff[k],
-                                  m,
                                   m_buff[k],
                                   fx,
                                   fy,
                                   fz,
-                                  gravity,
-                                  softening_factor);
+                                  softening_factor_sq);
     }
 
     return start_buff_idx;
@@ -164,12 +160,10 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
                     T px,
                     T py,
                     T pz,
-                    T m,
                     T &fx,
                     T &fy,
                     T &fz,
-                    const T gravity,
-                    const T softening_factor)
+                    const T softening_factor_sq)
 {
     int leaf_first_body = bodies_begin[leaf];
     int leaf_num_bodies = bodies_end[leaf] - leaf_first_body + 1;
@@ -199,13 +193,11 @@ void _evaluate_leaf(const SoAVec3<T> bodies_pos,
                                       x_buff[b],
                                       y_buff[b],
                                       z_buff[b],
-                                      m,
                                       m_buff[b],
                                       fx,
                                       fy,
                                       fz,
-                                      gravity,
-                                      softening_factor);
+                                      softening_factor_sq);
         }
     }
 }
@@ -296,14 +288,12 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     T fy = (T) 0.0f;
     T fz = (T) 0.0f;
 
-    __shared__ T gravity;
-    __shared__ T softening_factor;
+    __shared__ T softening_factor_sq;
 
     if (threadIdx.x == 0) {
         // TODO: prefill with nodes from lower levels
         queue[0] = 0;
-        gravity = PhysicsCommon<T>::get_gravity();
-        softening_factor = PhysicsCommon<T>::get_softening_factor();
+        softening_factor_sq = PhysicsCommon<T>::get_softening_factor_sq();
     }
 
     while (queue_size > 0) {
@@ -556,12 +546,10 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                    px,
                                    py,
                                    pz,
-                                   m,
                                    fx,
                                    fy,
                                    fz,
-                                   gravity,
-                                   softening_factor);
+                                   softening_factor_sq);
                     n++;
                     n_leaves++;
                 }
@@ -578,7 +566,6 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                                     px,
                                                     py,
                                                     pz,
-                                                    m,
                                                     fx,
                                                     fy,
                                                     fz,
@@ -588,8 +575,7 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                                     z_buff,
                                                     m_buff,
                                                     approx_buff_size,
-                                                    gravity,
-                                                    softening_factor);
+                                                    softening_factor_sq);
             }
 
             // Shouldn't be strictly needed here
@@ -618,7 +604,6 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                             px,
                                             py,
                                             pz,
-                                            m,
                                             fx,
                                             fy,
                                             fz,
@@ -628,21 +613,21 @@ __global__ void _barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                                             z_buff,
                                             m_buff,
                                             approx_buff_size,
-                                            gravity,
-                                            softening_factor);
+                                            softening_factor_sq);
     }
 
-    bodies_acc.x(body_idx) = fx / m;
-    bodies_acc.y(body_idx) = fy / m;
-    bodies_acc.z(body_idx) = fz / m;
+    T gravity = PhysicsCommon<T>::get_gravity();
+    bodies_acc.x(body_idx) = gravity * fx;
+    bodies_acc.y(body_idx) = gravity * fy;
+    bodies_acc.z(body_idx) = gravity * fz;
 
     /*
     if (body_idx == 0) {
         printf("%d\n", n_p2p);
     }
+    if (threadIdx.x == 0) 
+    printf("opened=%d, approx=%d, leaves=%d\n", n_opened, n_approx, n_leaves);
     */
-
-    //printf("opened=%d, approx=%d, leaves=%d\n", n_opened, n_approx, n_leaves);
 }
 
 template<typename T>

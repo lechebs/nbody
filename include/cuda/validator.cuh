@@ -9,10 +9,13 @@ public:
     Validator(const SoAVec3<T> &pos,
               const SoAVec3<T> &vel,
               const SoAVec3<T> &acc,
+              const T *mass,
               const int *d_sort_indices,
               int num_bodies,
               float dt,
               int max_timesteps);
+
+    SoAVec3<T> get_d_pos_ap() { return pos_ap_; };
 
     void copy_initial_conditions();
 
@@ -26,6 +29,10 @@ private:
     const SoAVec3<T> &pos_;
     const SoAVec3<T> &vel_;
     const SoAVec3<T> &acc_;
+    const T *mass_;
+
+    T *mass_ap_;
+    T *tmp_mass_ap_;
 
     SoAVec3<T> pos_ap_;
     SoAVec3<T> vel_ap_;

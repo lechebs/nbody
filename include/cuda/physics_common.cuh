@@ -19,7 +19,7 @@ class PhysicsCommon
 {
 public:
     static void set_params(T gravity,
-                           T softening_factor,
+                           T softening_factor_sq,
                            T velocity_dampening,
                            T domain_size);
 
@@ -29,7 +29,7 @@ public:
     }
 
     static __device__ __forceinline__ T get_gravity();
-    static __device__ __forceinline__ T get_softening_factor();
+    static __device__ __forceinline__ T get_softening_factor_sq();
     static __device__ __forceinline__ T get_velocity_dampening();
     static __device__ __forceinline__ T get_domain_size();
 
@@ -47,10 +47,9 @@ public:
     void accumulate_pairwise_force(
         T p1x, T p1y, T p1z,
         T p2x, T p2y, T p2z,
-        T m1, T m2,
+        T m2,
         T &dst_x, T &dst_y, T &dst_z,
-        T gravity,
-        T softening_factor)
+        T softening_factor_sq)
     {
         T dist_x = p2x - p1x;
         T dist_y = p2y - p1y;
@@ -58,7 +57,7 @@ public:
 
         T dist_sq = dist_x * dist_x + dist_y * dist_y + dist_z * dist_z;
 
-        T inv_den = dist_sq + softening_factor * softening_factor;
+        T inv_den = dist_sq + softening_factor_sq;
 
         if constexpr (std::is_same_v<T, float>) {
             // Use fast inverse sqrt intrinsic
@@ -68,7 +67,7 @@ public:
             inv_den = 1 / __dsqrt_rn(inv_den * inv_den * inv_den);
         }
 
-        inv_den = inv_den * m1 * m2 * gravity;
+        inv_den *= m2;
 
         dst_x += dist_x * inv_den;
         dst_y += dist_y * inv_den;

@@ -24,6 +24,7 @@ struct Simulation<T>::Impl
         validator(points.get_d_pos(),
                   bh.get_d_vel(),
                   bh.get_d_acc(),
+                  points.get_d_mass(),
                   points.get_d_sort_indices_ptr(),
                   params.num_points,
                   params.dt,
@@ -46,13 +47,15 @@ struct Simulation<T>::Impl
         validator(points.get_d_pos(),
                   bh.get_d_vel(),
                   bh.get_d_acc(),
+                  points.get_d_mass(),
                   points.get_d_sort_indices_ptr(),
                   params.num_points,
                   params.dt,
                   params.num_steps_validator)
     {
         PhysicsCommon<U>::set_params(params.gravity,
-                                     params.softening_factor,
+                                     params.softening_factor *
+                                        params.softening_factor,
                                      params.velocity_dampening,
                                      params.domain_size);
     }
@@ -90,7 +93,7 @@ struct Simulation<T>::Impl
             points.get_d_codes_first_point_idx_ptr());
         octree.compute_nodes_barycenter(points);
 
-        // octree.print();
+        //octree.print();
     }
 
     void updateBodiesPos()
@@ -159,22 +162,24 @@ void Simulation<T>::spawnBodies()
                                          _impl->points.get_d_pos(),
                                          _params.num_points);
     */
-    InitialConditions<T>::sample_disk(40.0,
-                                      10.0,
-                                      0.05,
+
+    InitialConditions<T>::sample_disk(10.0,
+                                      1.0,
+                                      0.03,
                                       0.2,
                                       -1.5,
-                                      5.5,
-                                      5.0,
-                                      5.1,
+                                      0.5,
+                                      0.5,
+                                      0.5,
                                       _params.domain_size,
-                                      { 0, 4.0, 0 },
+                                      { 0.0, 0.0, 0.0 },
                                       _impl->points.get_d_pos(),
                                       _impl->bh.get_d_vel(),
                                       _impl->points.get_d_mass(),
-                                      _params.num_points / 2,
+                                      _params.num_points,
                                       0);
 
+    /*
     InitialConditions<T>::sample_disk(40.0,
                                       10.0,
                                       0.05,
@@ -190,8 +195,11 @@ void Simulation<T>::spawnBodies()
                                       _impl->points.get_d_mass(),
                                       _params.num_points / 2,
                                       _params.num_points / 2);
+    */
 
-    //_impl->validator.copy_initial_conditions();
+    if (_params.num_steps_validator > 0) {
+        _impl->validator.copy_initial_conditions();
+    }
     _impl->updatePoints();
     _impl->updateOctree(_params.max_num_codes_per_leaf);
 }
@@ -205,7 +213,9 @@ void Simulation<T>::update()
 
     cudaEventRecord(start);
 
-    //_impl->validator.update_all_pairs();
+    if (_params.num_steps_validator > 0) {
+        _impl->validator.update_all_pairs();
+    }
 
     // Solve for position
     _impl->updateBodiesPos();
@@ -215,19 +225,30 @@ void Simulation<T>::update()
     // Solve for velocity
     _impl->updateBodiesVel();
 
+    if (_render_all_pairs) {
+        _impl->points.get_d_pos().copy(_impl->validator.get_d_pos_ap(),
+                                       _params.num_points);
+    }
+
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
     float ms;
     cudaEventElapsedTime(&ms, start, stop);
 
-    std::cout << "elapsed=" << ms << std::endl;
+    //std::cout << "elapsed=" << ms << std::endl;
 }
 
 template<typename T>
 int Simulation<T>::get_num_octree_nodes()
 {
     return _impl->octree.get_num_nodes();
+}
+
+template<typename T>
+void Simulation<T>::set_render_all_pairs(bool value)
+{
+    _render_all_pairs = value;
 }
 
 template<typename T>

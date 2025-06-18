@@ -29,6 +29,7 @@ public:
     void spawnBodies();
     void update();
     int get_num_octree_nodes();
+    void set_render_all_pairs(bool value);
     void writeHistory(const std::string &csv_file_path);
     ~Simulation();
 
@@ -37,6 +38,7 @@ private:
     std::unique_ptr<Impl<T>> _impl;
 
     Params _params;
+    bool _render_all_pairs = false;
 };
 
 #endif
