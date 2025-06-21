@@ -32,6 +32,6 @@ void main()
     vec4 color = vec4(0.9f, 0.3f, 0.2f, 1.0f);
 
     // Simple sphere shading
-    float falloff = (1.0f - r) * (1.0f - r) * (1.0f - r);
-    frag_color = color * vec4(1.0f, 1.0f, 1.0f, falloff * 0.2f);
+    float falloff = 1.0f - r;
+    frag_color = color * vec4(1.0f, 1.0f, 1.0f, falloff * 0.1f);
 }

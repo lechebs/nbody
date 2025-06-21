@@ -636,7 +636,6 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
                                   const int *leaf_first_code_idx,
                                   int num_octree_leaves)
 {
-    nvtxRangePushA("traverse");
     barnes_hut_traverse<<<num_bodies_ / GROUP_SIZE +
                           (num_bodies_ % GROUP_SIZE > 0),
                           GROUP_SIZE>>>
@@ -658,8 +657,6 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
                                 theta_,
                                 num_octree_leaves,
                                 num_bodies_);
-    cudaDeviceSynchronize();
-    nvtxRangePop();
 }
 
 template<typename T>

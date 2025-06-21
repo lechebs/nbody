@@ -182,21 +182,13 @@ void Simulation<T>::update()
         _impl->validator.update_all_pairs();
     }
 
-    nvtxRangePushA("step");
-
     // Solve for position
     _impl->update_bodies_pos();
     // Update octree
-    nvtxRangePushA("octree");
     _impl->update_points();
     _impl->update_octree(params_.max_num_codes_per_leaf);
-    cudaDeviceSynchronize();
-    nvtxRangePop();
     // Solve for velocity
     _impl->update_bodies_vel();
-
-    cudaDeviceSynchronize();
-    nvtxRangePop();
 
     if (render_all_pairs_) {
         _impl->points.get_d_pos().copy(_impl->validator.get_d_pos_ap(),
