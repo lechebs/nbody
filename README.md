@@ -12,7 +12,7 @@ The basic dependencies can be installed under Ubuntu by running
 sudo apt install build-essential libsdl2-dev libglew-dev
 ```
 
-Detailed installation instructions for the CUDA Toolkit can be found ![here](https://developer.nvidia.com/cuda-downloads).
+Detailed installation instructions for the CUDA Toolkit can be found at [here](https://developer.nvidia.com/cuda-downloads).
 
 ## Building
 
@@ -53,7 +53,7 @@ Drag to orbit the camera around the origin, and scroll to zoom. Pressing `o` key
 
 ![](2mln-explosion.gif)
 
-<iframe src="https://drive.google.com/file/d/1xW9Tdw1l5E27tiwxv8tOEpSVtm1SDOSY/preview" width="640" height="480" allow="autoplay"></iframe>
+An additional video can be found [here](https://drive.google.com/file/d/1xW9Tdw1l5E27tiwxv8tOEpSVtm1SDOSY/view?usp=sharin).
 
 ## Bibliography
 
