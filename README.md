@@ -53,7 +53,7 @@ Drag to orbit the camera around the origin, and scroll to zoom. Pressing `o` key
 
 ![](2mln-explosion.gif)
 
-An additional video can be found [here](https://drive.google.com/file/d/1xW9Tdw1l5E27tiwxv8tOEpSVtm1SDOSY/view?usp=sharin).
+An additional video can be found [here](https://drive.google.com/file/d/1YTa5hYdYPj_kloaZWec7PzCBgfg7Z7SG/view?usp=sharing).
 
 ## Bibliography
 
