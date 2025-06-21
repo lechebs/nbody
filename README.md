@@ -2,7 +2,7 @@
 
 A tree code implementation for the Barnes-Hut algorithm, running in real-time on the GPU, developed using CUDA C++ and OpenGL, which scales to systems of few million particles on a NVIDIA RTX 500 Ada Laptop GPU.
 
-![](1mln-clusters.png)
+![](screenshots/1mln-clusters.png)
 
 ## Prerequisites
 
@@ -37,21 +37,21 @@ Drag to orbit the camera around the origin, and scroll to zoom. Pressing `o` key
 
 ## Gallery
 
-| ![](spinning.png) |  ![](spinning-octree.png) |
+| ![](screenshots/spinning.png) |  ![](screenshots/spinning-octree.png) |
 |:--------:|:-------:|
 | Basic visualization | Octree visualization |
 
-| ![](disk.png) |  ![](shell-galaxy.png) |
+| ![](screenshots/disk.png) |  ![](screenshots/shell-galaxy.png) |
 |:--------:|:-------:|
 | Self-gravitating disk of 262,144 particles | Cold collapse of uniform sphere |
 
-| ![](disk.gif) |  ![](2disks.gif) |
+| ![](screenshots/disk.gif) |  ![](screenshots/2disks.gif) |
 |:--------:|:-------:|
 | Disk of 524,288 particles running at ~37 FPS (θ=0.75) | Two disks of 262,144 particles each running at ~30 FPS (θ=0.75) |
 
 ### 2,097,152 particles at ~150ms per step (θ=0.6)
 
-![](2mln-explosion.gif)
+![](screenshots/2mln-explosion.gif)
 
 An additional video can be found [here](https://drive.google.com/file/d/1YTa5hYdYPj_kloaZWec7PzCBgfg7Z7SG/view?usp=sharing).
 
@@ -62,23 +62,6 @@ An additional video can be found [here](https://drive.google.com/file/d/1YTa5hYd
 - Robin Cazalbou, Florent Duchaine, Eric Quémerais, Bastien Andrieu, Gabriel Staffelbach, and Bruno Maugars. 2024. Hybrid Multi-GPU Distributed Octrees Construction for Massively Parallel Code Coupling Applications. In Proceedings of the Platform for Advanced Scientific Computing Conference (PASC '24). Association for Computing Machinery, New York, NY, USA, Article 14, 1–11. https://doi.org/10.1145/3659914.3659928
 
 - Jeroen Bédorf, Evghenii Gaburov, and Simon Portegies Zwart. 2012. A sparse octree gravitational N-body code that runs entirely on the GPU processor. Journal of Computational Physics 231, 7 (2012), 2825–2839. DOI:https://doi.org/https://doi.org/10.1016/j.jcp.2011.12.024
-
-
-
-## TODO
-
-- fit octree to bbox
-- revert to 32 sized groups when traversing (apparently faster)
-- quadruple moments
-- switch to trailing underscore for private members, remove leading underscore for private methods
-- traversal queue allocation
-- plummer for accuracy
-
-## Future work
-
-- replace cub and thrust primitives with custom kernels
-- power spectrum ic
-- janus cosmological model
 
 
 
