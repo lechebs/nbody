@@ -6,7 +6,7 @@
 
 #include <GL/glew.h>
 
-#include "Matrix.hpp"
+#include "matrix.hpp"
 
 class ShaderProgram
 {
@@ -15,7 +15,7 @@ public:
 
     // Loads a shader from file, compiles it and
     // attaches it to the program
-    bool loadShader(const std::string &source_path,
+    bool load_shader(const std::string &source_path,
                     GLenum shader_type,
                     const std::string &FTYPE_ = "float");
     // Links the shaders attached to the program
@@ -23,17 +23,17 @@ public:
     // Enables the program
     void enable();
     // Loads a single integer inside a int GLSL uniform
-    bool loadUniformInt(const std::string &name, int value);
+    bool load_uniform_int(const std::string &name, int value);
     // Loads a single float inside a float GLSL uniform
-    bool loadUniformFloat(const std::string &name, float value);
+    bool load_uniform_float(const std::string &name, float value);
     // Loads a matrix inside a mat4 GLSL uniform
-    bool loadUniformMat4(const std::string &name,
+    bool load_uniform_mat4(const std::string &name,
                          const Matrix<float, 4, 4> &value);
 
     ~ShaderProgram();
 
 private:
-    GLuint _program_id;
+    GLuint program_id_;
 
     static const unsigned int _MAX_LOG_LENGTH = 1024;
 };

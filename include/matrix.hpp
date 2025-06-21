@@ -3,7 +3,7 @@
 
 #include <cassert>
 
-#include "Vector.hpp"
+#include "vector.hpp"
 
 template<typename T, size_t N, size_t M>
 class Matrix

@@ -1,6 +1,7 @@
-#include "Renderer.hpp"
+#include "renderer.hpp"
 
 #include <iostream>
+#include <fstream>
 #include <array>
 #include <cassert>
 #include <cstdlib>
@@ -8,91 +9,98 @@
 #include <fstream>
 #include <vector>
 #include <memory>
+#include <string>
 
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
 
-#include "Vector.hpp"
-#include "Camera.hpp"
-#include "ShaderProgram.hpp"
-#include "Simulation.hpp"
+#include "vector.hpp"
+#include "camera.hpp"
+#include "shader_program.hpp"
+#include "simulation.hpp"
 
-constexpr unsigned int N_POINTS = 2 << 18;
+#define PRECISION float
+#define STR_HELPER(x) #x
+#define TO_STR(x) STR_HELPER(x)
+
+constexpr unsigned int N_POINTS = 1 << 17;
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
 
-// TODO: make member variables
-static bool paused = false;
-static bool draw_octree = false;
-
 Renderer::Renderer(unsigned int window_width,
                    unsigned int window_height) :
-    _window_width(window_width),
-    _window_height(window_height),
-    _window_title("nbody"),
-    _camera(M_PI / 4,
+    window_width_(window_width),
+    window_height_(window_height),
+    window_title_("nbody"),
+    camera_(M_PI / 3,
             static_cast<float>(window_width) / window_height,
             -0.001,
             -20.0) {}
 
 bool Renderer::init()
 {
-    return _initialized = _init() && _loadShaders();
+    return initialized_ = init_() && load_shaders();
 }
 
 static int num_octree_nodes = 0;
 
 void Renderer::run()
 {
-    assert(_initialized);
+    assert(initialized_);
 
-    _allocBuffers();
-    _setupScene();
+    alloc_buffers();
+    setup_scene();
 
-    Simulation<float>::Params p;
+    Simulation<PRECISION>::Params p;
     p.num_points = N_POINTS;
     p.max_num_codes_per_leaf = 32;
-    p.theta = 0.75;
-    p.dt = 1e-3;
+    p.theta = 0.5;
+    p.dt = 1e-4;
     p.gravity = 1.0;
-    p.softening_factor = 1e-3;
+    p.softening_factor = 0.001;
     p.velocity_dampening = 0.0;
-    p.domain_size = 10.0;
-    //p.num_steps_validator = 0;
+    p.domain_size = 1.0;
+    p.num_steps_validator = 0;
 
-    _shader_programs[PARTICLE_SHADER].loadUniformFloat("domain_size",
+    shader_programs_[PARTICLE_SHADER].load_uniform_float("domain_size",
+                                                         p.domain_size);
+    shader_programs_[OCTREE_SHADER].load_uniform_float("domain_size",
                                                        p.domain_size);
-    _shader_programs[OCTREE_SHADER].loadUniformFloat("domain_size",
-                                                     p.domain_size);
 
-    Simulation<float> simulation(p, _ssbos);
-    simulation.spawnBodies();
-    while (_running) {
-        _handleEvents();
-        _updateDeltaTime();
+    Simulation<PRECISION> simulation(p, ssbos_);
+    simulation.spawn_points();
 
-        if (!paused) {
+
+    while (running_) {
+        handle_events();
+        update_delta_time();
+
+        if (!paused_) {
             simulation.update();
             num_octree_nodes = simulation.get_num_octree_nodes();
         }
 
         // Octree from previous iteration is drawn
 
-        _updateCamera();
-        _renderFrame();
+        updatecamera_();
+        render_frame();
     }
 
-    //simulation.writeHistory("output-sphere-03.csv");
+    if (p.num_steps_validator > 0) {
+        simulation.write_validation_history(
+            std::string() + "output-" + TO_STR(PRECISION) + "-0" +
+            std::to_string((int) (p.theta * 10)) + ".csv");
+        }
 }
 
 void Renderer::quit()
 {
-    _running = false;
+    running_ = false;
 }
 
 // Initializes the SDL window and the attached OpenGL context
-bool Renderer::_init()
+bool Renderer::init_()
 {
     // TODO: create utility to handle errors and logging
 
@@ -111,19 +119,19 @@ bool Renderer::_init()
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
     // Creating SDL2 window with OpenGL support.
-    if ((_window = SDL_CreateWindow(
-        _window_title.c_str(),
+    if ((window_ = SDL_CreateWindow(
+        window_title_.c_str(),
         SDL_WINDOWPOS_UNDEFINED,
         SDL_WINDOWPOS_UNDEFINED,
-        _window_width,
-        _window_height,
+        window_width_,
+        window_height_,
         SDL_WINDOW_OPENGL)) == nullptr) {
         std::cout << SDL_GetError() << std::endl;
         return false;
     }
 
     // Creating OpenGL context.
-    if (SDL_GL_CreateContext(_window) == nullptr) {
+    if (SDL_GL_CreateContext(window_) == nullptr) {
         std::cout << SDL_GetError() << std::endl;
         return false;
     }
@@ -142,7 +150,7 @@ bool Renderer::_init()
 }
 
 // Loads, compiles and links OpenGL shaders
-bool Renderer::_loadShaders()
+bool Renderer::load_shaders()
 {
     const std::array<std::string, 6> shaders_filename = {
         "shaders/particle.vert",
@@ -155,18 +163,18 @@ bool Renderer::_loadShaders()
 
     bool loaded = true;
 
-    for (int i = 0; i < _NUM_SHADER_PROGRAMS; ++i) {
+    for (int i = 0; i < _NUMshader_programs_; ++i) {
         // Needs to be called after OpenGL context creation
-        _shader_programs[i].create();
+        shader_programs_[i].create();
 
         loaded = loaded &
-                 _shader_programs[i].loadShader(shaders_filename[2 * i],
-                                                GL_VERTEX_SHADER,
-                                                "float") &
-                 _shader_programs[i].loadShader(shaders_filename[2 * i + 1],
-                                                GL_FRAGMENT_SHADER,
-                                                "float") &
-                 _shader_programs[i].link();
+                 shader_programs_[i].load_shader(shaders_filename[2 * i],
+                                                 GL_VERTEX_SHADER,
+                                                 TO_STR(PRECISION)) &
+                 shader_programs_[i].load_shader(shaders_filename[2 * i + 1],
+                                                 GL_FRAGMENT_SHADER,
+                                                 TO_STR(PRECISION)) &
+                 shader_programs_[i].link();
     }
 
     return loaded;
@@ -174,7 +182,7 @@ bool Renderer::_loadShaders()
 
 // Allocates OpenGL buffers to draw a quadrilateral
 // and to store particles positions
-void Renderer::_allocBuffers()
+void Renderer::alloc_buffers()
 {
     // Vertices and indices used to draw a quad.
     const std::array<float, 12> 
@@ -224,8 +232,8 @@ void Renderer::_allocBuffers()
     };
 
     // Creating a Vertex Array Object to handle quad vertices
-    glGenVertexArrays(1, &_quad_vao);
-    glBindVertexArray(_quad_vao);
+    glGenVertexArrays(1, &quad_vao_);
+    glBindVertexArray(quad_vao_);
     // Creating a Vertex Buffer Object to store vertices data.
     GLuint quad_vbo;
     glGenBuffers(1, &quad_vbo);
@@ -249,8 +257,8 @@ void Renderer::_allocBuffers()
                  quad_indices.data(),
                  GL_STATIC_DRAW);
 
-    glGenVertexArrays(1, &_cube_vao);
-    glBindVertexArray(_cube_vao);
+    glGenVertexArrays(1, &cube_vao_);
+    glBindVertexArray(cube_vao_);
 
     GLuint cube_vbo;
     glGenBuffers(1, &cube_vbo);
@@ -271,24 +279,14 @@ void Renderer::_allocBuffers()
                  cube_indices.data(),
                  GL_STATIC_DRAW);
 
-    // Sample particles data
-    /*
-    const std::array<float, 12>
-    particles_data = {
-         0.5f, -0.5f, 0.0f, 1.0f,
-        -0.5f, -0.5f, 0.0f, 1.0f,
-         0.0f,  0.5f, 0.0f, 1.0f,
-    };
-    */
-
     std::vector<double> dummy;
     dummy.reserve(2 * N_POINTS); // Needed for octree nodes as well
     // Creating Shader Storage Buffer Objects to store simulation data.
-    for (int i = 0; i < _NUM_SSBOS; ++i) {
-        glGenBuffers(1, &_ssbos[i]);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, _ssbos[i]);
+    for (int i = 0; i < _NUMssbos_; ++i) {
+        glGenBuffers(1, &ssbos_[i]);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, ssbos_[i]);
         // Copying particles data to GPU memory to define size
-        glBindBuffer(GL_SHADER_STORAGE_BUFFER, _ssbos[i]);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbos_[i]);
         glBufferData(GL_SHADER_STORAGE_BUFFER,
                      2 * N_POINTS * sizeof(double),
                      dummy.data(),
@@ -297,36 +295,32 @@ void Renderer::_allocBuffers()
 }
 
 // Sets OpenGL rendering options, arranges the scene
-void Renderer::_setupScene()
+void Renderer::setup_scene()
 {
     // Defines the rendering target area with
     // respect to the window coordinates
-    glViewport(0, 0, _window_width, _window_height);
+    glViewport(0, 0, window_width_, window_height_);
     // Sets clear color
     glClearColor(0.05f, 0.05f, 0.05f, 0.0f);
-    // Enabling transparency
+    // Enabling additive blending
     glEnable(GL_BLEND);
-    //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-    // Enabling depth testing
-    //glEnable(GL_DEPTH_TEST);
 
-    //_camera.setPosition({ 0.0f, 0.0f, -1.0f });
-    _camera.setSphericalPosition({ 1.0f, 0.0f, M_PI / 2 });
+    camera_.set_spherical_position({ 1.0f, 0.0f, M_PI / 2 });
 
-    _camera.setOrbitMode(true);
-    _camera.setOrbitModeCenter({ 0.0f, 0.0f, 0.0f });
+    camera_.set_orbit_mode(true);
+    camera_.set_orbit_mode_center({ 0.0f, 0.0f, 0.0f });
 
-    for (int i = 0; i < _NUM_SHADER_PROGRAMS; ++i) {
-        _shader_programs[i].loadUniformMat4(
-            "perspective_projection", _camera.getPerspectiveProjection());
+    for (int i = 0; i < _NUMshader_programs_; ++i) {
+        shader_programs_[i].load_uniform_mat4(
+            "perspective_projection", camera_.get_perspective_projection());
     }
 
-    _updateCamera();
+    updatecamera_();
 }
 
 // Handles keyboard and mouse inputs
-void Renderer::_handleEvents()
+void Renderer::handle_events()
 {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
@@ -340,14 +334,25 @@ void Renderer::_handleEvents()
         } else if (event.type == SDL_MOUSEWHEEL) {
             // Zooming camera
             vec3 zoom_delta({ 0, 0, 0.1f * event.wheel.preciseY });
-            // _camera.move(zoom_delta);
-            _camera.orbit({ 0.01f * event.wheel.preciseY, 0, 0 });
+            camera_.orbit({ 0.01f * event.wheel.preciseY, 0, 0 });
+
         } else if (event.type == SDL_KEYUP &&
                    event.key.keysym.sym == SDLK_SPACE) {
-            paused = !paused;
+            paused_ = !paused_;
+
+        } else if (event.type == SDL_KEYUP &&
+                   event.key.keysym.sym == SDLK_d) {
+            draw_domain_ = !draw_domain_;
+
         } else if (event.type == SDL_KEYUP &&
                    event.key.keysym.sym == SDLK_o) {
-            draw_octree = !draw_octree;
+            draw_octree_ = !draw_octree_;
+
+            if (!draw_octree_) {
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            } else {
+                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            }
         }
     }
 
@@ -361,21 +366,13 @@ void Renderer::_handleEvents()
     if (mouse_btn_state & SDL_BUTTON(1)) {
         // Normalize to canonical cube
         vec3 normalized_mouse_delta({
-            2.0f / _window_width * (prev_mouse_x - mouse_x),
-            2.0f / _window_height * (prev_mouse_y - mouse_y),
+            2.0f / window_width_ * (prev_mouse_x - mouse_x),
+            2.0f / window_height_ * (prev_mouse_y - mouse_y),
             0
         });
 
-        //normalized_mouse_delta[0] = -0.03;
-        //normalized_mouse_delta[1] = 0.0;
-
-        // Translating camera
-        // _camera.move(normalized_mouse_delta);
-
-        _camera.orbit({
+        camera_.orbit({
             0, normalized_mouse_delta[1], normalized_mouse_delta[0] });
-        //_camera.update(0.0);
-        //_camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
     }
 
     prev_mouse_x = mouse_x;
@@ -383,54 +380,54 @@ void Renderer::_handleEvents()
 }
 
 // Computes the time between two consecutive frames
-void Renderer::_updateDeltaTime()
+void Renderer::update_delta_time()
 {
     static Uint64 prev_ticks = 0;
 
     Uint64 curr_ticks = SDL_GetTicks64();
-    _delta_time = static_cast<float>(curr_ticks - prev_ticks) / 1000;
+    delta_time_ = static_cast<float>(curr_ticks - prev_ticks) / 1000;
     prev_ticks = curr_ticks;
 }
 
-void Renderer::_updateCamera()
+void Renderer::updatecamera_()
 {
-    //_camera.lookAt({ 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f });
-    _camera.update(_delta_time);
+    camera_.update(delta_time_);
 
-    for (int i = 0; i < _NUM_SHADER_PROGRAMS; ++i) {
+    for (int i = 0; i < _NUMshader_programs_; ++i) {
         // Updating the GLSL world to camera transformation matrix
-        _shader_programs[i].loadUniformMat4(
-            "world_to_camera", _camera.getWorldToCamera());
+        shader_programs_[i].load_uniform_mat4(
+            "world_to_camera", camera_.get_world_to_camera());
     }
 }
 
 // Renders a single frame to the window
-void Renderer::_renderFrame()
+void Renderer::render_frame()
 {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    _shader_programs[PARTICLE_SHADER].enable();
-    glBindVertexArray(_quad_vao);
+    shader_programs_[PARTICLE_SHADER].enable();
+    glBindVertexArray(quad_vao_);
     glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, N_POINTS);
 
     // Drawing octree
-    if (draw_octree) {
-        _shader_programs[OCTREE_SHADER].enable();
-        glBindVertexArray(_cube_vao);
-        glDrawElementsInstanced(GL_LINES, 24, GL_UNSIGNED_INT, 0, num_octree_nodes);
+    if (draw_octree_) {
+        shader_programs_[OCTREE_SHADER].enable();
+        glBindVertexArray(cube_vao_);
+        glDrawElementsInstanced(
+            GL_LINES, 24, GL_UNSIGNED_INT, 0, num_octree_nodes);
     }
 
-    /*
-    _shader_programs[CUBE_SHADER].enable();
-    glBindVertexArray(_cube_vao);
-    glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
-    */
+    if (draw_domain_) {
+        shader_programs_[CUBE_SHADER].enable();
+        glBindVertexArray(cube_vao_);
+        glDrawElements(GL_LINES, 24, GL_UNSIGNED_INT, 0);
+    }
 
-    SDL_GL_SwapWindow(_window);
+    SDL_GL_SwapWindow(window_);
 }
 
 Renderer::~Renderer()
 {
-    SDL_DestroyWindow(_window);
+    SDL_DestroyWindow(window_);
     SDL_Quit();
 }

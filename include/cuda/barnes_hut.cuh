@@ -14,22 +14,22 @@ public:
 
     SoAVec3<T> &get_d_vel()
     {
-        return _vel;
+        return vel_;
     }
 
     SoAVec3<T> &get_d_vel_half()
     {
-        return _vel_half;
+        return vel_half_;
     }
 
     SoAVec3<T> &get_d_acc()
     {
-        return _acc;
+        return acc_;
     }
 
     void sort_bodies(const int *sort_indices);
 
-    // TODO: takes this parameters from constructor
+    // TODO: pass this parameters to constructor
     void solve_pos(const Octree<T> &octree,
                    const int *codes_first_point_idx,
                    const int *leaf_first_code_idx,
@@ -44,21 +44,21 @@ public:
     ~BarnesHut();
 
 private:
-    void _compute_forces(const Octree<T> &octree,
-                         const T *bodies_mass,
-                         const int *codes_first_point_idx,
-                         const int *leaf_first_code_idx,
-                         int num_leaves);
+    void compute_forces(const Octree<T> &octree,
+                        const T *bodies_mass,
+                        const int *codes_first_point_idx,
+                        const int *leaf_first_code_idx,
+                        int num_leaves);
 
-    int _num_bodies;
-    float _theta;
-    float _dt;
+    int num_bodies_;
+    float theta_;
+    float dt_;
 
-    SoAVec3<T> &_pos;
+    SoAVec3<T> &pos_;
 
-    SoAVec3<T> _vel;
-    SoAVec3<T> _vel_half;
-    SoAVec3<T> _acc;
+    SoAVec3<T> vel_;
+    SoAVec3<T> vel_half_;
+    SoAVec3<T> acc_;
 
     SoAVec3<T> tmp_vel_;
     SoAVec3<T> tmp_vel_half_;
@@ -67,7 +67,7 @@ private:
     float *mass_;
     float *tmp_mass_;
 
-    int *_queues;
+    int *queues_;
 };
 
 #endif

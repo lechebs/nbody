@@ -13,7 +13,6 @@
 template<typename T> class Octree
 {
 public:
-    // max_depth ~= btree_height / 3
     Octree(int max_num_leaves, float domain_size);
     Octree(int max_num_leaves,
            float domain_size,
@@ -24,39 +23,39 @@ public:
 
     const SoAOctreeNodes get_d_nodes() const
     {
-        return _nodes;
+        return nodes_;
     }
 
     const T *get_d_nodes_size() const
     {
-        return _nodes_size;
+        return nodes_size_;
     }
 
     const T *get_d_nodes_mass() const
     {
-        return _nodes_mass;
+        return nodes_mass_;
     }
 
     const SoAVec3<T> get_d_barycenters() const
     {
-        return _barycenters;
+        return barycenters_;
     }
 
     const int *get_d_points_begin_ptr() const
     {
-        return _points_begin;
+        return points_begin_;
     }
 
     const int *get_d_points_end_ptr() const
     {
-        return _points_end;
+        return points_end_;
     }
 
     int get_num_nodes()
     {
         int num_nodes;
         cudaMemcpy(&num_nodes,
-                   _num_nodes,
+                   num_nodes_,
                    sizeof(int),
                    cudaMemcpyDeviceToHost);
         return num_nodes;
@@ -64,7 +63,7 @@ public:
 
     void set_max_num_nodes(int max_num_nodes)
     {
-        _max_num_nodes = max_num_nodes;
+        max_num_nodes_ = max_num_nodes;
     }
 
     void build(const Btree &btree);
@@ -74,89 +73,30 @@ public:
 
     void compute_nodes_barycenter(const Points<T> &points);
 
-    void print()
-    {
-        std::vector<int> first_child(_max_num_nodes);
-        std::vector<int> num_children(_max_num_nodes);
-        std::vector<int> leaves_begin(_max_num_nodes);
-        std::vector<int> leaves_end(_max_num_nodes);
-        std::vector<float> x_barycenter(_max_num_nodes);
-        std::vector<float> y_barycenter(_max_num_nodes);
-        std::vector<float> z_barycenter(_max_num_nodes);
-        std::vector<float> size(_max_num_nodes);
-
-        cudaMemcpy(first_child.data(),
-                   _nodes._first_child,
-                   sizeof(int) * _max_num_nodes,
-                   cudaMemcpyDeviceToHost);
-        cudaMemcpy(num_children.data(),
-                   _nodes._num_children,
-                   sizeof(int) * _max_num_nodes,
-                   cudaMemcpyDeviceToHost);
-        cudaMemcpy(leaves_begin.data(),
-                   _points_begin,
-                   sizeof(int) * _max_num_nodes,
-                   cudaMemcpyDeviceToHost);
-        cudaMemcpy(leaves_end.data(),
-                   _points_end,
-                   sizeof(int) * _max_num_nodes,
-                   cudaMemcpyDeviceToHost);
-        cudaMemcpy(x_barycenter.data(),
-                   _barycenters.x(),
-                   sizeof(float) * _max_num_nodes,
-                   cudaMemcpyDeviceToHost);
-        cudaMemcpy(y_barycenter.data(),
-                   _barycenters.y(),
-                   sizeof(float) * _max_num_nodes,
-                   cudaMemcpyDeviceToHost);
-        cudaMemcpy(z_barycenter.data(),
-                   _barycenters.z(),
-                   sizeof(float) * _max_num_nodes,
-                   cudaMemcpyDeviceToHost);
-        cudaMemcpy(size.data(),
-                   _nodes_size,
-                   sizeof(float) * _max_num_nodes,
-                   cudaMemcpyDeviceToHost);
-
-        for (int i = 0; i < _max_num_nodes; ++i)
-        {
-            printf("%2d: [", i);
-            for (int j = 0; j < num_children[i]; ++j) {
-                printf(" %3d", first_child[i] + j);
-            }
-            printf("] - (%f, %f, %f) - %3d %3d - %g\n",
-                   x_barycenter[i], y_barycenter[i], z_barycenter[i],
-                   leaves_begin[i], leaves_end[i], size[i]);
-
-        }
-        printf("\n");
-    }
-
-
     ~Octree();
 
 private:
-    void _init(int max_num_leaves);
+    void init_(int max_num_leaves);
 
-    float _domain_size;
+    float domain_size_;
 
-    int _max_depth;
-    int _max_num_nodes;
+    int max_depth_;
+    int max_num_nodes_;
 
-    int *_num_nodes;
+    int *num_nodes_;
 
-    SoAOctreeNodes _nodes;
+    SoAOctreeNodes nodes_;
     // Array to store the side length of each octree node
-    T *_nodes_size;
+    T *nodes_size_;
     // Array to store the mass of each octree node
-    T *_nodes_mass;
+    T *nodes_mass_;
     // Barycenter coordinates of the points within each node
-    SoAVec3<T> _barycenters;
+    SoAVec3<T> barycenters_;
     // Arrays to store the range of points covered by each node
-    int *_points_begin;
-    int *_points_end;
+    int *points_begin_;
+    int *points_end_;
 
-    bool _gl_buffers;
+    bool gl_buffers_;
 };
 
 #endif

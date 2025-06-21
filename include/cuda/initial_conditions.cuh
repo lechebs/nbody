@@ -60,11 +60,12 @@ public:
         to_dev_(dst, buff, offset);
     }
 
-    static void sample_disk(float center_mass,
+    static void sample_disk(float star_mass,
                             float disk_mass,
                             float r_min,
                             float r_max,
-                            float exp,
+                            float alpha,
+                            float h,
                             float center_x,
                             float center_y,
                             float center_z,
@@ -92,21 +93,21 @@ public:
         vel_buff[1][0] = vel.y;
         vel_buff[2][0] = vel.z;
 
-        mass_buff[0] = center_mass;
+        mass_buff[0] = star_mass;
 
         for (int i = 1; i < num_bodies; ++i) {
-            T r = rand_powerlaw_(r_min, r_max, exp);
+            T r = rand_powerlaw_(r_min, r_max, alpha);
             T theta = rand_u_(0, 2 * M_PI);
 
             pos_buff[0][i] = center_x + r * std::cos(theta);
             pos_buff[1][i] = center_y + r * std::sin(theta);
-            pos_buff[2][i] = center_z + r * rand_norm_(0, 0.01);
+            pos_buff[2][i] = center_z + r * rand_norm_(0, h);
 
             // Computing circular velocity mass
 
-            T r_pow = std::pow(r, exp + 1);
-            T r_min_pow = std::pow(r_min, exp + 1);
-            T r_max_pow = std::pow(r_max, exp + 1);
+            T r_pow = std::pow(r, alpha + 1);
+            T r_min_pow = std::pow(r_min, alpha + 1);
+            T r_max_pow = std::pow(r_max, alpha + 1);
 
             T enc_mass = mass_buff[0] + disk_mass * (r_pow - r_min_pow) /
                                                     (r_max_pow - r_min_pow);

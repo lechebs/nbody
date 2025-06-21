@@ -1,9 +1,9 @@
-#include "Camera.hpp"
+#include "camera.hpp"
 
 #include <cmath>
 
-#include "Vector.hpp"
-#include "Matrix.hpp"
+#include "vector.hpp"
+#include "matrix.hpp"
 
 Camera::Camera(float fovy,
                float aspect_ratio,
@@ -15,57 +15,59 @@ Camera::Camera(float fovy,
     _axis_v({ 0.0, 1.0, 0.0 }),
     _axis_n({ 0.0, 0.0, -1.0 })
 {
-    _computeWorldToCamera();
-    _computePerspectiveProjection(fovy, aspect_ratio, near, far);
+    compute_world_to_camera();
+    compute_perspective_projection(fovy, aspect_ratio, near, far);
 }
 
-const vec3 &Camera::getPosition() const
+const vec3 &Camera::get_position() const
 {
     return _position;
 }
 
-const mat4 &Camera::getWorldToCamera() const
+const mat4 &Camera::get_world_to_camera() const
 {
     return _worldToCamera;
 }
 
-const mat4 &Camera::getPerspectiveProjection() const
+const mat4 &Camera::get_perspective_projection() const
 {
     return _perspectiveProjection;
 }
 
-void Camera::setPosition(const vec3 &position)
+void Camera::set_position(const vec3 &position)
 {
     _position = position;
     _target_position = position;
 }
 
-void Camera::setSphericalPosition(const vec3 &position)
+void Camera::set_spherical_position(const vec3 &position)
 {
     _spherical_position = position;
     _target_spherical_position = position;
-    _sphericalToCartesian();
+    spherical_to_cartesian();
 }
 
-void Camera::setFrameOfReference(const vec3 &u, const vec3 &v, const vec3 &n)
+void Camera::set_frame_of_reference(const vec3 &u,
+                                    const vec3 &v,
+                                    const vec3 &n)
 {
     _axis_u = u;
     _axis_v = v;
     _axis_n = n;
 }
 
-void Camera::setOrbitMode(bool flag)
+void Camera::set_orbit_mode(bool flag)
 {
     _orbit_mode = flag;
 }
 
-void Camera::setOrbitModeCenter(const vec3 &center)
+void Camera::set_orbit_mode_center(const vec3 &center)
 {
     _orbit_mode_center = center;
     _orbit_mode_view_up = { 0.0f, 1.0f, 0.0f };
 }
 
-void Camera::lookAt(const vec3 &point, const vec3 &view_up)
+void Camera::look_at(const vec3 &point, const vec3 &view_up)
 {
     _axis_n = _position - point;
     _axis_u = vec3::cross(view_up, _axis_n);
@@ -93,8 +95,8 @@ void Camera::orbit(const vec3 &delta)
     _target_spherical_position -= delta;
 
     // Clamp radius
-    if (_target_spherical_position[0] < 0.0001) {
-        _target_spherical_position[0] = 0.0001;
+    if (_target_spherical_position[0] < 0.01) {
+        _target_spherical_position[0] = 0.01;
     }
 
     // Clamp theta
@@ -112,18 +114,18 @@ void Camera::update(float dt)
     if (_orbit_mode) {
         _spherical_position += dt * _ORBIT_SPEED *
             (_target_spherical_position - _spherical_position);
-        _sphericalToCartesian();
-        lookAt(_orbit_mode_center, _orbit_mode_view_up);
+        spherical_to_cartesian();
+        look_at(_orbit_mode_center, _orbit_mode_view_up);
     } else {
         // Linearly interpolating
         _position += dt * _MOVE_SPEED *
             (_target_position - _position);
     }
 
-    _computeWorldToCamera();
+    compute_world_to_camera();
 }
 
-void Camera::_computeWorldToCamera()
+void Camera::compute_world_to_camera()
 {
     mat4 rotation = mat4::identity();
     mat4 translation = mat4::identity();
@@ -139,10 +141,10 @@ void Camera::_computeWorldToCamera()
     _worldToCamera = rotation * translation;
 }
 
-void Camera::_computePerspectiveProjection(float fovy,
-                                           float aspect_ratio,
-                                           float near,
-                                           float far)
+void Camera::compute_perspective_projection(float fovy,
+                                            float aspect_ratio,
+                                            float near,
+                                            float far)
 {
     mat4 &mat = _perspectiveProjection;
 
@@ -153,7 +155,7 @@ void Camera::_computePerspectiveProjection(float fovy,
     mat(3, 2) = - 1.0;
 }
 
-void Camera::_sphericalToCartesian()
+void Camera::spherical_to_cartesian()
 { // TODO: clamp values
     float theta = _spherical_position[1];
     float phi = _spherical_position[2];

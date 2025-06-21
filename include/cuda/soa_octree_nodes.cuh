@@ -9,83 +9,83 @@ public:
     // Device getters
     __device__ __forceinline__ int first_child(int idx) const
     {
-        return _first_child[idx];
+        return first_child_[idx];
     }
 
     __device__ __forceinline__ int num_children(int idx) const
     {
-        return _num_children[idx];
+        return num_children_[idx];
     }
 
     __device__ __forceinline__ int leaves_begin(int idx) const
     {
-        return _leaves_begin[idx];
+        return leaves_begin_[idx];
     }
 
     __device__ __forceinline__ int leaves_end(int idx) const
     {
-        return _leaves_end[idx];
+        return leaves_end_[idx];
     }
 
     __device__ __forceinline__ int depth(int idx) const
     {
-        return _depth[idx];
+        return depth_[idx];
     }
 
     // Device setters
     __device__ __forceinline__ int &first_child(int idx)
     {
-        return _first_child[idx];
+        return first_child_[idx];
     }
 
     __device__ __forceinline__ int &num_children(int idx)
     {
-        return _num_children[idx];
+        return num_children_[idx];
     }
 
     __device__ __forceinline__ int &leaves_begin(int idx)
     {
-        return _leaves_begin[idx];
+        return leaves_begin_[idx];
     }
 
     __device__ __forceinline__ int &leaves_end(int idx)
     {
-        return _leaves_end[idx];
+        return leaves_end_[idx];
     }
 
     __device__ __forceinline__ int &depth(int idx)
     {
-        return _depth[idx];
+        return depth_[idx];
     }
 
     void alloc(int num_nodes)
     {
-        cudaMalloc(&_first_child, num_nodes * sizeof(int));
-        cudaMalloc(&_num_children, num_nodes * sizeof(int));
-        cudaMalloc(&_leaves_begin, num_nodes * sizeof(int));
-        cudaMalloc(&_leaves_end, num_nodes * sizeof(int));
-        cudaMalloc(&_depth, num_nodes * sizeof(int));
+        cudaMalloc(&first_child_, num_nodes * sizeof(int));
+        cudaMalloc(&num_children_, num_nodes * sizeof(int));
+        cudaMalloc(&leaves_begin_, num_nodes * sizeof(int));
+        cudaMalloc(&leaves_end_, num_nodes * sizeof(int));
+        cudaMalloc(&depth_, num_nodes * sizeof(int));
     }
 
     void free()
     {
-        cudaFree(_first_child);
-        cudaFree(_num_children);
-        cudaFree(_leaves_begin);
-        cudaFree(_leaves_end);
-        cudaFree(_depth);
+        cudaFree(first_child_);
+        cudaFree(num_children_);
+        cudaFree(leaves_begin_);
+        cudaFree(leaves_end_);
+        cudaFree(depth_);
     }
 
 private:
     // Array to store the index of the first child of each node
-    int *_first_child;
+    int *first_child_;
     // Array to store the number of children of each node
-    int *_num_children;
+    int *num_children_;
     // Arrays to store the range of leaves covered by each node
-    int *_leaves_begin;
-    int *_leaves_end;
+    int *leaves_begin_;
+    int *leaves_end_;
     // Array to store the depth of each node
-    int *_depth;
+    int *depth_;
 };
 
 #endif

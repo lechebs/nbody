@@ -62,16 +62,16 @@ namespace
                                                          az_ap * az_ap);
     }
 
-    template<typename T> __global__ void
-    compute_conserved_quantities(const SoAVec3<T> pos,
-                                 const SoAVec3<T> vel,
-                                 const T *mass,
-                                 const SoAVec3<T> pos_ap,
-                                 const SoAVec3<T> vel_ap,
-                                 T *energy,
-                                 T *energy_ap,
-                                 int curr_step,
-                                 int num_bodies)
+    template<typename T> __global__
+    void compute_conserved_quantities(const SoAVec3<T> pos,
+                                      const SoAVec3<T> vel,
+                                      const T *mass,
+                                      const SoAVec3<T> pos_ap,
+                                      const SoAVec3<T> vel_ap,
+                                      T *energy,
+                                      T *energy_ap,
+                                      int curr_step,
+                                      int num_bodies)
     {
         int idx = blockIdx.x * blockDim.x + threadIdx.x;
         if (idx >= num_bodies) {
@@ -286,10 +286,14 @@ void Validator<T>::update_all_pairs()
                            sys_energy_ap_ + curr_step_,
                            num_bodies_);
 
+    /*
     pos_ap_.copy(pos_, num_bodies_);
     vel_ap_.copy(vel_, num_bodies_);
     acc_ap_.copy(acc_, num_bodies_);
+    */
 
+
+    nvtxRangePushA("all-pairs");
     // Solving for all-pairs pos
     leapfrog_integrate_pos<<<num_blocks,
                              MAX_THREADS_PER_BLOCK>>>(pos_ap_,
@@ -311,6 +315,8 @@ void Validator<T>::update_all_pairs()
                                                       acc_ap_,
                                                       dt_,
                                                       num_bodies_);
+    cudaDeviceSynchronize();
+    nvtxRangePop();
 
     curr_step_ = (curr_step_ + 1) % max_timesteps_;
 }

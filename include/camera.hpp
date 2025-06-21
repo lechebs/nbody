@@ -1,8 +1,8 @@
 #ifndef CAMERA_H
 #define CAMERA_H
 
-#include "Vector.hpp"
-#include "Matrix.hpp"
+#include "vector.hpp"
+#include "matrix.hpp"
 
 using vec3 = Vector<float, 3>;
 using mat4 = Matrix<float, 4, 4>;
@@ -15,21 +15,21 @@ public:
            float near, /* z coordinate of near clipping plane */
            float far   /* z coordinate of far clipping plane */);
 
-    const vec3 &getPosition() const;
+    const vec3 &get_position() const;
     // Getters for camera transformation matrices
-    const mat4 &getWorldToCamera() const;
-    const mat4 &getPerspectiveProjection() const;
+    const mat4 &get_world_to_camera() const;
+    const mat4 &get_perspective_projection() const;
 
-    void setPosition(const vec3 &position);
-    void setSphericalPosition(const vec3 &position);
+    void set_position(const vec3 &position);
+    void set_spherical_position(const vec3 &position);
     // Sets camera frame of reference axes
-    void setFrameOfReference(const vec3 &u, /* x axis on view plane */
+    void set_frame_of_reference(const vec3 &u, /* x axis on view plane */
                              const vec3 &v, /* y axis on view plane */
                              const vec3 &n  /* normal to the view plane */);
-    void setOrbitMode(bool flag);
-    void setOrbitModeCenter(const vec3 &center);
+    void set_orbit_mode(bool flag);
+    void set_orbit_mode_center(const vec3 &center);
     // Points the camera to the given point
-    void lookAt(const vec3 &point,
+    void look_at(const vec3 &point,
                 const vec3 &view_up = { 0.0, 1.0, 0.0 });
 
     // Moves the camera around the look at point
@@ -45,17 +45,17 @@ private:
     // Computes the transformation matrix
     // to move from world coordinates to
     // camera coordinates
-    void _computeWorldToCamera();
+    void compute_world_to_camera();
     // Computes the transformation matrix
     // to project points in camera coordinates
     // to the view plane
-    void _computePerspectiveProjection(float fovy,
-                                       float aspect_ratio,
-                                       float near,
-                                       float far);
+    void compute_perspective_projection(float fovy,
+                                        float aspect_ratio,
+                                        float near,
+                                        float far);
     // Converts current spherical coordinates position
     // to cartesian coordinates
-    void _sphericalToCartesian();
+    void spherical_to_cartesian();
 
     // Cartesian coordinates
     vec3 _position;

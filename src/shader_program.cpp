@@ -1,4 +1,4 @@
-#include "ShaderProgram.hpp"
+#include "shader_program.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -6,17 +6,17 @@
 
 #include <GL/glew.h>
 
-#include "Matrix.hpp"
+#include "matrix.hpp"
 
 void ShaderProgram::create()
 {
     // Requires an active OpenGL context
-    _program_id = glCreateProgram();
+    program_id_ = glCreateProgram();
 }
 
-bool ShaderProgram::loadShader(const std::string &source_path,
-                               GLenum shader_type,
-                               const std::string &FTYPE_)
+bool ShaderProgram::load_shader(const std::string &source_path,
+                                GLenum shader_type,
+                                const std::string &FTYPE_)
 {
     const GLuint shader = glCreateShader(shader_type);
 
@@ -52,7 +52,7 @@ bool ShaderProgram::loadShader(const std::string &source_path,
         std::cout << "Error while compiling shader " << source_path <<
             ": " << buffer.data();
     } else {
-        glAttachShader(_program_id, shader);
+        glAttachShader(program_id_, shader);
     }
 
     glDeleteShader(shader);
@@ -62,17 +62,17 @@ bool ShaderProgram::loadShader(const std::string &source_path,
 
 bool ShaderProgram::link()
 {
-    glLinkProgram(_program_id);
+    glLinkProgram(program_id_);
 
     // Checking for link status.
     int success;
-    glGetProgramiv(_program_id, GL_LINK_STATUS, &success);
+    glGetProgramiv(program_id_, GL_LINK_STATUS, &success);
     if (!success) {
         std::string buffer;
         buffer.reserve(_MAX_LOG_LENGTH);
         buffer.clear();
 
-        glGetProgramInfoLog(_program_id,
+        glGetProgramInfoLog(program_id_,
                             _MAX_LOG_LENGTH,
                             nullptr,
                             buffer.data());
@@ -84,12 +84,12 @@ bool ShaderProgram::link()
 
 void ShaderProgram::enable()
 {
-    glUseProgram(_program_id);
+    glUseProgram(program_id_);
 }
 
-bool ShaderProgram::loadUniformInt(const std::string &name, int value)
+bool ShaderProgram::load_uniform_int(const std::string &name, int value)
 {
-    GLuint location = glGetUniformLocation(_program_id, name.c_str());
+    GLuint location = glGetUniformLocation(program_id_, name.c_str());
 
     if (location != -1u) {
         enable();
@@ -99,9 +99,9 @@ bool ShaderProgram::loadUniformInt(const std::string &name, int value)
     return location > 0;
 }
 
-bool ShaderProgram::loadUniformFloat(const std::string &name, float value)
+bool ShaderProgram::load_uniform_float(const std::string &name, float value)
 {
-    GLuint location = glGetUniformLocation(_program_id, name.c_str());
+    GLuint location = glGetUniformLocation(program_id_, name.c_str());
 
     if (location != -1u) {
         enable();
@@ -112,10 +112,10 @@ bool ShaderProgram::loadUniformFloat(const std::string &name, float value)
 }
 
 
-bool ShaderProgram::loadUniformMat4(const std::string &name,
+bool ShaderProgram::load_uniform_mat4(const std::string &name,
                                     const Matrix<float, 4, 4> &value)
 {
-    GLuint location = glGetUniformLocation(_program_id, name.c_str());
+    GLuint location = glGetUniformLocation(program_id_, name.c_str());
 
     if (location != -1u) {
         enable();
@@ -129,5 +129,5 @@ bool ShaderProgram::loadUniformMat4(const std::string &name,
 
 ShaderProgram::~ShaderProgram()
 {
-    glDeleteProgram(_program_id);
+    glDeleteProgram(program_id_);
 }
