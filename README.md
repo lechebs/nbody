@@ -16,11 +16,11 @@ Detailed installation instructions for the CUDA Toolkit can be found at [here](h
 
 ## Building
 
-To build the project for a GPU with compute capabily (CC) `xy`, run
+To build the project for a GPU with compute capability `xy`, run
 ```
 make CUDA_ARCHS="xy"
 ```
-More info on CC versioning [here](https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/#gpu-feature-list). If `CUDA_ARCHS` is not specified, the program will be built for CCs 50, 60, 70, 75, 80 and 89.
+More info on compute capability versioning [here](https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/#gpu-feature-list). If not specified, the program will be built for the following architectures: `50 60 70 75 80 89`.
 
 Build files will be placed under `build/`, running
 ```

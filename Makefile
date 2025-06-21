@@ -3,7 +3,16 @@ BUILD_DIR = build
 
 CXX = g++
 CXXFLAGS = -Wall -Wextra -std=c++20
-LDLIBS = -lGL -lGLEW -lSDL2
+
+SDL2_CFLAGS := $(shell pkg-config --cflags sdl2)
+SDL2_LIBS   := $(shell pkg-config --libs sdl2)
+GLEW_CFLAGS := $(shell pkg-config --cflags glew)
+GLEW_LIBS   := $(shell pkg-config --libs glew)
+OPENGL_LIBS := -lGL
+
+CXXFLAGS += $(SDL2_CFLAGS) $(GLEW_CFLAGS)
+LDLIBS   := $(SDL2_LIBS) $(GLEW_LIBS) $(OPENGL_LIBS)
+
 INCLUDE = -Iinclude
 
 NVCC = nvcc
