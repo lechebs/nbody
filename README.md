@@ -43,11 +43,11 @@ Drag to orbit the camera around the origin, and scroll to zoom. Pressing `o` key
 
 | ![](disk.png) |  ![](shell-galaxy.png) |
 |:--------:|:-------:|
-| Self-gravitating disk of 262k particles | Cold collapse of uniform sphere |
+| Self-gravitating disk of 262,144 particles | Cold collapse of uniform sphere |
 
 | ![](disk.gif) |  ![](2disks.gif) |
 |:--------:|:-------:|
-| Disk of 524k particles running at ~37 FPS (θ=0.75) | Two disks of 262k particles each running at ~30 FPS (θ=0.75) |
+| Disk of 524,288 particles running at ~37 FPS (θ=0.75) | Two disks of 262,144 particles each running at ~30 FPS (θ=0.75) |
 
 ### 2,097,152 particles at ~150ms per step (θ=0.6)
 
