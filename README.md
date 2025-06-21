@@ -53,6 +53,8 @@ Drag to orbit the camera around the origin, and scroll to zoom. Pressing `o` key
 
 ![](2mln-explosion.gif)
 
+<iframe src="https://drive.google.com/file/d/1xW9Tdw1l5E27tiwxv8tOEpSVtm1SDOSY/preview" width="640" height="480" allow="autoplay"></iframe>
+
 ## Bibliography
 
 - Tero Karras. 2012. Maximizing parallelism in the construction of BVHs, octrees, and k-d trees. In Proceedings of the Fourth ACM SIGGRAPH / Eurographics conference on High-Performance Graphics (EGGH-HPG'12). Eurographics Association, Goslar, DEU, 33–37.
