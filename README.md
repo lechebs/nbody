@@ -9,7 +9,7 @@ A tree code implementation for the Barnes-Hut algorithm, running in real-time on
 The program was developed and tested on Ubuntu 22.04 LTS using the CUDA Toolkit 12.9, SDL2 and OpenGL 4.3 core.
 The basic dependencies can be installed under Ubuntu by running
 ```
-sudo apt install build-essential libsdl2-dev libglew-dev
+sudo apt install build-essential libgl1-mesa-dev libsdl2-dev libglew-dev
 ```
 
 Detailed installation instructions for the CUDA Toolkit can be found at [here](https://developer.nvidia.com/cuda-downloads).
