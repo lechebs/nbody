@@ -12,7 +12,7 @@ The basic dependencies can be installed under Ubuntu by running
 sudo apt install build-essential libgl1-mesa-dev libsdl2-dev libglew-dev
 ```
 
-Detailed installation instructions for the CUDA Toolkit can be found at [here](https://developer.nvidia.com/cuda-downloads).
+Detailed installation instructions for the CUDA Toolkit can be found [here](https://developer.nvidia.com/cuda-downloads).
 
 ## Building
 
