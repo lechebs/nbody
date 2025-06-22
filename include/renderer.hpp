@@ -24,8 +24,8 @@ public:
 private:
     enum ShaderProgramId { PARTICLE_SHADER, CUBE_SHADER, OCTREE_SHADER };
 
-    constexpr static int _NUMshader_programs_ = 3;
-    constexpr static int _NUMssbos_ = 7;
+    constexpr static int NUM_SHADER_PROGRAMS_ = 3;
+    constexpr static int NUM_SSBOS_ = 7;
 
     bool init_();
     bool load_shaders();
@@ -35,7 +35,7 @@ private:
 
     void handle_events();
     void update_delta_time();
-    void updatecamera_();
+    void update_camera();
     void render_frame();
 
     bool running_ = true;
@@ -45,7 +45,6 @@ private:
     bool draw_octree_ = false;
     bool draw_domain_ = false;
 
-    // TODO: create separate Window class
     SDL_Window *window_;
     int window_width_;
     int window_height_;
@@ -53,14 +52,17 @@ private:
 
     GLuint quad_vao_;
     GLuint cube_vao_;
-    GLuint ssbos_[_NUMssbos_];
+    GLuint ssbos_[NUM_SSBOS_];
 
-    ShaderProgram shader_programs_[_NUMshader_programs_];
+    ShaderProgram shader_programs_[NUM_SHADER_PROGRAMS_];
 
     Camera camera_;
 
     // Frametime
     float delta_time_;
+
+    int num_points_;
+    int num_octree_nodes_;
 };
 
 #endif

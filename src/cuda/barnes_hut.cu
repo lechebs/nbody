@@ -8,10 +8,10 @@
 #include "cuda/octree.cuh"
 
 #define WARP_SIZE 32
-#define GROUP_SIZE 32
-#define NUM_WARPS (GROUP_SIZE / WARP_SIZE)
-// WARNING: too big may cause invalid device ordinal
-#define QUEUE_SIZE 4096
+
+__constant__ int QUEUE_SIZE;
+__constant__ int GROUP_SIZE;
+__constant__ int NUM_WARPS;
 
 // TODO: try removing inlining to reduce registers usage
 __device__ __forceinline__ int warp_scan(int var, int lane_idx)
@@ -221,34 +221,23 @@ __global__ void barnes_hut_traverse(const SoAVec3<T> bodies_pos,
         return;
     }
 
-    // TODO: on sm_89 the max num of blocks per sm is 24
-    // and the total shared mem is ~100KB, so blocks of
-    // size 32 don't saturate the sm. With blocks of 64
-    // we can get ~4KB of shared memory per block and fully
-    // saturate the sms. We can thus allocate the node queue
-    // on the shared memory, and fallback to global memory
-    // when needed, at least that's what they did for Bonsai
-    // apparently. The control flow there looks more prone
-    // to divergence when it comes to handling the type of node,
-    // so perhaps don't bother buffering nodes to be opened.
-    // Also, try to use shfl instructions to avoid
-    // using shared memory to pass around bodies data when
-    // evaluating p2p forces.
+    extern __shared__ int shmem[];
 
-    __shared__ T x_buff[GROUP_SIZE];
-    __shared__ T y_buff[GROUP_SIZE];
-    __shared__ T z_buff[GROUP_SIZE];
-    __shared__ T m_buff[GROUP_SIZE];
+    T *x_buff = (T *) shmem;
+    T *y_buff = &x_buff[GROUP_SIZE];
+    T *z_buff = &y_buff[GROUP_SIZE];
+    T *m_buff = &z_buff[GROUP_SIZE];
 
-    __shared__ int approx_buff[GROUP_SIZE * 2];
-    __shared__ int open_buff[GROUP_SIZE];
-    __shared__ int nchildren_buff[GROUP_SIZE];
+    int *approx_buff = (int *) &m_buff[GROUP_SIZE];
+    int *open_buff = &approx_buff[GROUP_SIZE * 2];
+    int *nchildren_buff = &open_buff[GROUP_SIZE];
 
-    __shared__ int approx_blk_scan[WARP_SIZE];
-    __shared__ int open_blk_scan[WARP_SIZE];
-    __shared__ int nchildren_blk_scan[WARP_SIZE];
+    int *approx_blk_scan = &nchildren_buff[GROUP_SIZE];
+    int *open_blk_scan = &approx_blk_scan[WARP_SIZE];
+    int *nchildren_blk_scan = &open_blk_scan[WARP_SIZE];
 
-    __shared__ unsigned int sh_leaf_mask;
+    unsigned int *sh_leaf_mask =
+        (unsigned int *) &nchildren_blk_scan[WARP_SIZE];
 
     queue += blockIdx.x * QUEUE_SIZE;
     next_queue += blockIdx.x * QUEUE_SIZE;
@@ -256,13 +245,6 @@ __global__ void barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     int approx_buff_size = 0;
     int open_buff_size = 0;
     int tot_num_children = 0;
-
-    // We're considering each code as a single body during the
-    // traversal, even though it may map to more than one body.
-    // The position of the first point mapped to a given code is
-    // taken as the position of the whole code.
-    // Nevertheless, when forces need to be evaluated,
-    // all points covered by the codes are considered.
 
     int lane_idx = threadIdx.x % WARP_SIZE;
     int warp_idx = threadIdx.x / WARP_SIZE;
@@ -276,12 +258,11 @@ __global__ void barnes_hut_traverse(const SoAVec3<T> bodies_pos,
     T fy = (T) 0.0f;
     T fz = (T) 0.0f;
 
-    __shared__ T softening_factor_sq;
+    T softening_factor_sq = PhysicsCommon<T>::get_softening_factor_sq();
 
     if (threadIdx.x == 0) {
         // TODO: prefill with nodes from lower levels
         queue[0] = 0;
-        softening_factor_sq = PhysicsCommon<T>::get_softening_factor_sq();
     }
 
     while (queue_size > 0) {
@@ -425,7 +406,8 @@ __global__ void barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                     if (threadIdx.x == 0) {
                         printf("[%04d:%04d] WARNING: not enough memory for "
                                "next traversal queue, "
-                               "traversal will terminate early.\n",
+                               "traversal will terminate early, "
+                               "increase mem_traversal_queues.\n",
                                threadIdx.x, blockIdx.x);
                     }
                 } else {
@@ -454,7 +436,7 @@ __global__ void barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 if (warp_idx == w) {
                     leaf_mask = __ballot_sync(0xffffffff, is_leaf);
                     if (lane_idx == 0) {
-                        sh_leaf_mask = leaf_mask;
+                        *sh_leaf_mask = leaf_mask;
                     }
 
                     leaves[lane_idx] = node;
@@ -463,7 +445,7 @@ __global__ void barnes_hut_traverse(const SoAVec3<T> bodies_pos,
                 __syncthreads();
 
                 if (warp_idx != w) {
-                    leaf_mask = sh_leaf_mask;
+                    leaf_mask = *sh_leaf_mask;
                 }
 
                 unsigned int src_lane = 0;
@@ -558,14 +540,18 @@ template<typename T>
 BarnesHut<T>::BarnesHut(SoAVec3<T> &bodies_pos,
                         int num_bodies,
                         float theta,
-                        float dt) :
+                        float dt,
+                        size_t mem_queues,
+                        int group_size) :
     pos_(bodies_pos),
     num_bodies_(num_bodies),
     theta_(theta),
-    dt_(dt)
+    dt_(dt),
+    mem_queues_(mem_queues),
+    group_size_(group_size)
 {
     // Allocate space for traversal queues
-    cudaMalloc(&queues_, 2 * (num_bodies / GROUP_SIZE) * QUEUE_SIZE * sizeof(int));
+    cudaMalloc(&queues_, mem_queues);
 
     vel_.alloc(num_bodies);
     vel_half_.alloc(num_bodies);
@@ -577,6 +563,15 @@ BarnesHut<T>::BarnesHut(SoAVec3<T> &bodies_pos,
 
     vel_.zeros(num_bodies);
     acc_.zeros(num_bodies);
+
+    // Copy to constant memory
+    int num_groups = (num_bodies - 1) / group_size + 1;
+    int queue_size_per_group = mem_queues / (2 * sizeof(int) * num_groups);
+    cudaMemcpyToSymbol(QUEUE_SIZE, &queue_size_per_group, sizeof(int));
+    cudaMemcpyToSymbol(GROUP_SIZE, &group_size, sizeof(int));
+
+    int num_warps = (group_size - 1) / WARP_SIZE + 1;
+    cudaMemcpyToSymbol(NUM_WARPS, &num_warps, sizeof(int));
 }
 
 template<typename T>
@@ -636,9 +631,15 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
                                   const int *leaf_first_code_idx,
                                   int num_octree_leaves)
 {
-    barnes_hut_traverse<<<num_bodies_ / GROUP_SIZE +
-                          (num_bodies_ % GROUP_SIZE > 0),
-                          GROUP_SIZE>>>
+    int shmem_size = 4 * sizeof(T) * group_size_ +
+                     4 * sizeof(int) * group_size_ +
+                     3 * sizeof(int) * WARP_SIZE +
+                     sizeof(unsigned int);
+
+    barnes_hut_traverse<<<num_bodies_ / group_size_ +
+                          (num_bodies_ % group_size_ > 0),
+                          group_size_,
+                          shmem_size>>>
                                (pos_,
                                 bodies_mass,
                                 acc_,
@@ -651,8 +652,7 @@ void BarnesHut<T>::compute_forces(const Octree<T> &octree,
                                 codes_first_point_idx,
                                 leaf_first_code_idx,
                                 queues_,
-                                queues_ + (num_bodies_ / GROUP_SIZE) *
-                                   QUEUE_SIZE,
+                                queues_ + mem_queues_ / sizeof(int) / 2,
                                 1,
                                 theta_,
                                 num_octree_leaves,

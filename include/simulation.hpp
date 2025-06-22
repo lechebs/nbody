@@ -16,6 +16,8 @@ public:
     {
         int num_points;
         int max_num_codes_per_leaf;
+        int traversal_group_size;
+        size_t mem_traversal_queues;
         float theta;
         float dt;
         float gravity;

@@ -43,8 +43,6 @@ bool Renderer::init()
     return initialized_ = init_() && load_shaders();
 }
 
-static int num_octree_nodes = 0;
-
 void Renderer::run()
 {
     assert(initialized_);
@@ -62,6 +60,10 @@ void Renderer::run()
     p.velocity_dampening = 0.0;
     p.domain_size = 1.0;
     p.num_steps_validator = 0;
+    p.mem_traversal_queues = (1 << 20) * 50;
+    p.traversal_group_size = 32;
+
+    num_points_ = p.num_points;
 
     shader_programs_[PARTICLE_SHADER].load_uniform_float("domain_size",
                                                          p.domain_size);
@@ -78,12 +80,12 @@ void Renderer::run()
 
         if (!paused_) {
             simulation.update();
-            num_octree_nodes = simulation.get_num_octree_nodes();
+            num_octree_nodes_ = simulation.get_num_octree_nodes();
         }
 
         // Octree from previous iteration is drawn
 
-        updatecamera_();
+        update_camera();
         render_frame();
     }
 
@@ -163,7 +165,7 @@ bool Renderer::load_shaders()
 
     bool loaded = true;
 
-    for (int i = 0; i < _NUMshader_programs_; ++i) {
+    for (int i = 0; i < NUM_SHADER_PROGRAMS_; ++i) {
         // Needs to be called after OpenGL context creation
         shader_programs_[i].create();
 
@@ -282,7 +284,7 @@ void Renderer::alloc_buffers()
     std::vector<double> dummy;
     dummy.reserve(2 * N_POINTS); // Needed for octree nodes as well
     // Creating Shader Storage Buffer Objects to store simulation data.
-    for (int i = 0; i < _NUMssbos_; ++i) {
+    for (int i = 0; i < NUM_SSBOS_; ++i) {
         glGenBuffers(1, &ssbos_[i]);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, ssbos_[i]);
         // Copying particles data to GPU memory to define size
@@ -311,12 +313,12 @@ void Renderer::setup_scene()
     camera_.set_orbit_mode(true);
     camera_.set_orbit_mode_center({ 0.0f, 0.0f, 0.0f });
 
-    for (int i = 0; i < _NUMshader_programs_; ++i) {
+    for (int i = 0; i < NUM_SHADER_PROGRAMS_; ++i) {
         shader_programs_[i].load_uniform_mat4(
             "perspective_projection", camera_.get_perspective_projection());
     }
 
-    updatecamera_();
+    update_camera();
 }
 
 // Handles keyboard and mouse inputs
@@ -389,11 +391,11 @@ void Renderer::update_delta_time()
     prev_ticks = curr_ticks;
 }
 
-void Renderer::updatecamera_()
+void Renderer::update_camera()
 {
     camera_.update(delta_time_);
 
-    for (int i = 0; i < _NUMshader_programs_; ++i) {
+    for (int i = 0; i < NUM_SHADER_PROGRAMS_; ++i) {
         // Updating the GLSL world to camera transformation matrix
         shader_programs_[i].load_uniform_mat4(
             "world_to_camera", camera_.get_world_to_camera());
@@ -407,14 +409,14 @@ void Renderer::render_frame()
 
     shader_programs_[PARTICLE_SHADER].enable();
     glBindVertexArray(quad_vao_);
-    glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, N_POINTS);
+    glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, num_points_);
 
     // Drawing octree
     if (draw_octree_) {
-        shader_programs_[OCTREE_SHADER].enable();
+       shader_programs_[OCTREE_SHADER].enable();
         glBindVertexArray(cube_vao_);
         glDrawElementsInstanced(
-            GL_LINES, 24, GL_UNSIGNED_INT, 0, num_octree_nodes);
+            GL_LINES, 24, GL_UNSIGNED_INT, 0, num_octree_nodes_);
     }
 
     if (draw_domain_) {

@@ -10,7 +10,9 @@ public:
     BarnesHut(SoAVec3<T> &bodies_pos,
               int num_bodies,
               float theta,
-              float dt);
+              float dt,
+              size_t mem_queues,
+              int group_size);
 
     SoAVec3<T> &get_d_vel()
     {
@@ -53,6 +55,8 @@ private:
     int num_bodies_;
     float theta_;
     float dt_;
+    size_t mem_queues_;
+    int group_size_;
 
     SoAVec3<T> &pos_;
 
