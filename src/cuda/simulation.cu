@@ -64,6 +64,7 @@ struct Simulation<T>::Impl
                   params.dt,
                   params.num_steps_validator)
     {
+        InitialConditions<T>::set_seed(42);
         PhysicsCommon<U>::set_params(params.gravity,
                                      params.softening_factor *
                                         params.softening_factor,
@@ -131,7 +132,7 @@ template<typename T>
 Simulation<T>::Simulation(Simulation<T>::Params &params) :
     params_(params)
 {
-    _impl = std::make_unique<Simulation::Impl<T>>(params);
+    impl_ = std::make_unique<Simulation::Impl<T>>(params);
 }
 
 template<typename T>
@@ -152,76 +153,100 @@ Simulation<T>::Simulation(Simulation<T>::Params &params, GLuint buffers[7]) :
         cudaGraphicsResourceGetMappedPointer(&mapped_ptrs[i], &size, res);
     }
 
-    _impl = std::make_unique<Simulation::Impl<T>>(params,
+    impl_ = std::make_unique<Simulation::Impl<T>>(params,
                                                   mapped_ptrs);
 }
 
 template<typename T>
-void Simulation<T>::spawn_points()
+void Simulation<T>::exec_post_spawn()
 {
-    InitialConditions<T>::set_seed(42);
+    if (params_.num_steps_validator > 0) {
+        impl_->validator.copy_initial_conditions();
+    }
+    impl_->update_points();
+    impl_->update_octree(params_.max_num_codes_per_leaf);
+}
 
+template<typename T>
+void Simulation<T>::spawn_uniform()
+{
+    InitialConditions<T>::sample_uniform(1.0,
+                                         params_.domain_size * 0.5,
+                                         params_.domain_size * 0.5,
+                                         params_.domain_size * 0.5,
+                                         params_.domain_size,
+                                         impl_->points.get_d_pos(),
+                                         impl_->points.get_d_mass(),
+                                         params_.num_points);
+    exec_post_spawn();
+}
+
+
+template<typename T>
+void Simulation<T>::spawn_sphere()
+{
+    InitialConditions<T>::sample_sphere(0.5,
+                                        params_.domain_size * 0.5,
+                                        params_.domain_size * 0.5,
+                                        params_.domain_size * 0.5,
+                                        params_.domain_size,
+                                        impl_->points.get_d_pos(),
+                                        impl_->points.get_d_mass(),
+                                        params_.num_points,
+                                        0);
+    exec_post_spawn();
+}
+
+template<typename T>
+void Simulation<T>::spawn_disk()
+{
     InitialConditions<T>::sample_disk(10.0,
                                       1.0,
                                       0.03,
                                       0.30,
                                       -1.5,
                                       0.05,
-                                      0.5,
-                                      0.5,
-                                      0.5,
+                                      params_.domain_size * 0.5,
+                                      params_.domain_size * 0.5,
+                                      params_.domain_size * 0.5,
                                       params_.domain_size,
                                       { 0.0, 0.0, 0.0 },
-                                      _impl->points.get_d_pos(),
-                                      _impl->bh.get_d_vel(),
-                                      _impl->points.get_d_mass(),
+                                      impl_->points.get_d_pos(),
+                                      impl_->bh.get_d_vel(),
+                                      impl_->points.get_d_mass(),
                                       params_.num_points,
                                       0);
-
-    if (params_.num_steps_validator > 0) {
-        _impl->validator.copy_initial_conditions();
-    }
-    _impl->update_points();
-    _impl->update_octree(params_.max_num_codes_per_leaf);
+    exec_post_spawn();
 }
+
+
 
 template<typename T>
 void Simulation<T>::update()
 {
     if (params_.num_steps_validator > 0) {
-        _impl->validator.update_all_pairs();
+        impl_->validator.update_all_pairs();
     }
 
     // Solve for position
-    _impl->update_bodies_pos();
+    impl_->update_bodies_pos();
     // Update octree
-    _impl->update_points();
-    _impl->update_octree(params_.max_num_codes_per_leaf);
+    impl_->update_points();
+    impl_->update_octree(params_.max_num_codes_per_leaf);
     // Solve for velocity
-    _impl->update_bodies_vel();
-
-    if (render_all_pairs_) {
-        _impl->points.get_d_pos().copy(_impl->validator.get_d_pos_ap(),
-                                       params_.num_points);
-    }
+    impl_->update_bodies_vel();
 }
 
 template<typename T>
 int Simulation<T>::get_num_octree_nodes()
 {
-    return _impl->octree.get_num_nodes();
-}
-
-template<typename T>
-void Simulation<T>::set_render_all_pairs(bool value)
-{
-    render_all_pairs_ = value;
+    return impl_->octree.get_num_nodes();
 }
 
 template<typename T>
 void Simulation<T>::write_validation_history(const std::string &csv_file_path)
 {
-    _impl->validator.dump_history_to_csv(csv_file_path);
+    impl_->validator.dump_history_to_csv(csv_file_path);
 }
 
 template<typename T>

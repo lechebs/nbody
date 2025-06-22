@@ -287,13 +287,13 @@ void Validator<T>::update_all_pairs()
                            num_bodies_);
 
     /*
+    Needed for step-local acc error, but energy plot gets messed up
     pos_ap_.copy(pos_, num_bodies_);
     vel_ap_.copy(vel_, num_bodies_);
     acc_ap_.copy(acc_, num_bodies_);
     */
 
 
-    nvtxRangePushA("all-pairs");
     // Solving for all-pairs pos
     leapfrog_integrate_pos<<<num_blocks,
                              MAX_THREADS_PER_BLOCK>>>(pos_ap_,
@@ -315,8 +315,6 @@ void Validator<T>::update_all_pairs()
                                                       acc_ap_,
                                                       dt_,
                                                       num_bodies_);
-    cudaDeviceSynchronize();
-    nvtxRangePop();
 
     curr_step_ = (curr_step_ + 1) % max_timesteps_;
 }

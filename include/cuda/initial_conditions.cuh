@@ -17,21 +17,33 @@ public:
         std::srand(seed);
     }
 
-    static void sample_uniform(float domain_size,
-                               SoAVec3<T> &dst,
+    static void sample_uniform(float scale,
+                               float center_x,
+                               float center_y,
+                               float center_z,
+                               float domain_size,
+                               SoAVec3<T> &pos_dst,
+                               T *mass_dst,
                                int num_bodies)
     {
-        Vec3Buff buff;
-        resize_buff_(buff, num_bodies);
+        Vec3Buff pos_buff;
+        resize_buff_(pos_buff, num_bodies);
 
-        for (int i = 0; i < 3; ++i) {
-            for (int j = 0; j < num_bodies; ++j) {
-                buff[i][j] = rand_u_(0.01, domain_size - 0.01);
+        std::vector<T> mass_buff;
+        mass_buff.resize(num_bodies);
+
+        float center[] = { center_x, center_y, center_z };
+
+        for (int i = 0; i < num_bodies; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                pos_buff[j][i] = center[j] + rand_u_(-0.5, 0.5) * scale;
             }
+            mass_buff[i] = 1.0;//std::min((T) 1.0, rand_norm_(50.0, 25.0));
         }
 
-        clamp_buff_values_(buff, 0, domain_size);
-        to_dev_(dst, buff, 0);
+        clamp_buff_values_(pos_buff, 0, domain_size);
+        to_dev_(pos_dst, pos_buff, 0);
+        to_dev_(mass_dst, mass_buff, 0);
     }
 
     static void sample_sphere(float radius,
@@ -39,25 +51,32 @@ public:
                               float center_y,
                               float center_z,
                               float domain_size,
-                              SoAVec3<T> &dst,
+                              SoAVec3<T> &pos_dst,
+                              T *mass_dst,
                               int num_bodies,
                               int offset = 0)
     {
-        Vec3Buff buff;
-        resize_buff_(buff, num_bodies);
+        Vec3Buff pos_buff;
+        resize_buff_(pos_buff, num_bodies);
+
+        std::vector<T> mass_buff;
+        mass_buff.resize(num_bodies);
 
         for (int i = 0; i < num_bodies; ++i) {
             T r = std::pow(rand_u_(0, 1), 1.0 / 3.0) * radius;
             T theta = std::acos(rand_u_(-1, 1));
             T phi = rand_u_(0, 2 * M_PI);
 
-            buff[0][i] = center_x + r * std::sin(theta) * std::cos(phi);
-            buff[1][i] = center_y + r * std::sin(theta) * std::sin(phi);
-            buff[2][i] = center_z + r * std::cos(theta);
+            pos_buff[0][i] = center_x + r * std::sin(theta) * std::cos(phi);
+            pos_buff[1][i] = center_y + r * std::sin(theta) * std::sin(phi);
+            pos_buff[2][i] = center_z + r * std::cos(theta);
+
+            mass_buff[i] = 1.0;//rand_u_(1.0, 50.0);
         }
 
-        clamp_buff_values_(buff, 0, domain_size);
-        to_dev_(dst, buff, offset);
+        clamp_buff_values_(pos_buff, 0, domain_size);
+        to_dev_(pos_dst, pos_buff, offset);
+        to_dev_(mass_dst, mass_buff, offset);
     }
 
     static void sample_disk(float star_mass,

@@ -9,6 +9,9 @@
 
 #include "camera.hpp"
 #include "shader_program.hpp"
+#include "simulation.hpp"
+
+#define SIM_PRECISION float
 
 class Renderer
 {
@@ -23,6 +26,7 @@ public:
 
 private:
     enum ShaderProgramId { PARTICLE_SHADER, CUBE_SHADER, OCTREE_SHADER };
+    enum SimulationSpawner { SPAWN_UNIFORM, SPAWN_SPHERE, SPAWN_DISK };
 
     constexpr static int NUM_SHADER_PROGRAMS_ = 3;
     constexpr static int NUM_SSBOS_ = 7;
@@ -32,6 +36,8 @@ private:
 
     void alloc_buffers();
     void setup_scene();
+
+    void start_simulation(SimulationSpawner spawner);
 
     void handle_events();
     void update_delta_time();
@@ -57,6 +63,8 @@ private:
     ShaderProgram shader_programs_[NUM_SHADER_PROGRAMS_];
 
     Camera camera_;
+
+    std::unique_ptr<Simulation<SIM_PRECISION>> simulation_;
 
     // Frametime
     float delta_time_;

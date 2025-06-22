@@ -19,11 +19,10 @@
 #include "shader_program.hpp"
 #include "simulation.hpp"
 
-#define PRECISION float
 #define STR_HELPER(x) #x
 #define TO_STR(x) STR_HELPER(x)
 
-constexpr unsigned int N_POINTS = 1 << 17;
+constexpr unsigned int N_POINTS = 1 << 18; // Multiple of 32
 
 using vec3f = Vector<float, 3>;
 using vec3d = Vector<double, 3>;
@@ -47,53 +46,25 @@ void Renderer::run()
 {
     assert(initialized_);
 
+    num_points_ = N_POINTS;
+
     alloc_buffers();
     setup_scene();
 
-    Simulation<PRECISION>::Params p;
-    p.num_points = N_POINTS;
-    p.max_num_codes_per_leaf = 32;
-    p.theta = 0.5;
-    p.dt = 1e-4;
-    p.gravity = 1.0;
-    p.softening_factor = 0.001;
-    p.velocity_dampening = 0.0;
-    p.domain_size = 1.0;
-    p.num_steps_validator = 0;
-    p.mem_traversal_queues = (1 << 20) * 50;
-    p.traversal_group_size = 32;
-
-    num_points_ = p.num_points;
-
-    shader_programs_[PARTICLE_SHADER].load_uniform_float("domain_size",
-                                                         p.domain_size);
-    shader_programs_[OCTREE_SHADER].load_uniform_float("domain_size",
-                                                       p.domain_size);
-
-    Simulation<PRECISION> simulation(p, ssbos_);
-    simulation.spawn_points();
-
+    start_simulation(SPAWN_DISK);
 
     while (running_) {
         handle_events();
         update_delta_time();
 
         if (!paused_) {
-            simulation.update();
-            num_octree_nodes_ = simulation.get_num_octree_nodes();
+            simulation_->update();
+            num_octree_nodes_ = simulation_->get_num_octree_nodes();
         }
-
-        // Octree from previous iteration is drawn
 
         update_camera();
         render_frame();
     }
-
-    if (p.num_steps_validator > 0) {
-        simulation.write_validation_history(
-            std::string() + "output-" + TO_STR(PRECISION) + "-0" +
-            std::to_string((int) (p.theta * 10)) + ".csv");
-        }
 }
 
 void Renderer::quit()
@@ -172,10 +143,10 @@ bool Renderer::load_shaders()
         loaded = loaded &
                  shader_programs_[i].load_shader(shaders_filename[2 * i],
                                                  GL_VERTEX_SHADER,
-                                                 TO_STR(PRECISION)) &
+                                                 TO_STR(SIM_PRECISION)) &
                  shader_programs_[i].load_shader(shaders_filename[2 * i + 1],
                                                  GL_FRAGMENT_SHADER,
-                                                 TO_STR(PRECISION)) &
+                                                 TO_STR(SIM_PRECISION)) &
                  shader_programs_[i].link();
     }
 
@@ -282,7 +253,7 @@ void Renderer::alloc_buffers()
                  GL_STATIC_DRAW);
 
     std::vector<double> dummy;
-    dummy.reserve(2 * N_POINTS); // Needed for octree nodes as well
+    dummy.reserve(2 * num_points_); // Needed for octree nodes as well
     // Creating Shader Storage Buffer Objects to store simulation data.
     for (int i = 0; i < NUM_SSBOS_; ++i) {
         glGenBuffers(1, &ssbos_[i]);
@@ -290,7 +261,7 @@ void Renderer::alloc_buffers()
         // Copying particles data to GPU memory to define size
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbos_[i]);
         glBufferData(GL_SHADER_STORAGE_BUFFER,
-                     2 * N_POINTS * sizeof(double),
+                     2 * num_points_ * sizeof(double),
                      dummy.data(),
                      GL_DYNAMIC_DRAW);
     }
@@ -308,7 +279,7 @@ void Renderer::setup_scene()
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 
-    camera_.set_spherical_position({ 1.0f, 0.0f, M_PI / 2 });
+    camera_.set_spherical_position({ 0.3f, 0.0f, M_PI / 2 });
 
     camera_.set_orbit_mode(true);
     camera_.set_orbit_mode_center({ 0.0f, 0.0f, 0.0f });
@@ -319,6 +290,55 @@ void Renderer::setup_scene()
     }
 
     update_camera();
+}
+
+void Renderer::start_simulation(SimulationSpawner spawner)
+{
+    Simulation<SIM_PRECISION>::Params p;
+    p.num_points = N_POINTS;
+    p.max_num_codes_per_leaf = 32;
+    p.theta = 0.75;
+    p.gravity = 1.0;
+    p.velocity_dampening = 0.0;
+    p.num_steps_validator = 0;
+    p.mem_traversal_queues = (1 << 20) * 50;
+    p.traversal_group_size = 32;
+    p.domain_size = 5.0;
+
+    switch (spawner) {
+        case SPAWN_DISK:
+            p.dt = 1e-4;
+            p.softening_factor = 0.001;
+            break;
+        case SPAWN_UNIFORM:
+            p.dt = 1e-6;
+            p.softening_factor = 0.01;
+            break;
+        case SPAWN_SPHERE:
+            p.dt = 1e-6;
+            p.softening_factor = 0.1;
+            break;
+    }
+
+    num_points_ = p.num_points;
+    simulation_ = std::make_unique<Simulation<SIM_PRECISION>>(p, ssbos_);
+
+    switch (spawner) {
+        case SPAWN_UNIFORM:
+            simulation_->spawn_uniform();
+            break;
+        case SPAWN_SPHERE:
+            simulation_->spawn_sphere();
+            break;
+         case SPAWN_DISK:
+            simulation_->spawn_disk();
+            break;
+    }
+
+    shader_programs_[PARTICLE_SHADER].load_uniform_float("domain_size",
+                                                         p.domain_size);
+    shader_programs_[OCTREE_SHADER].load_uniform_float("domain_size",
+                                                       p.domain_size);
 }
 
 // Handles keyboard and mouse inputs
@@ -338,22 +358,31 @@ void Renderer::handle_events()
             vec3 zoom_delta({ 0, 0, 0.1f * event.wheel.preciseY });
             camera_.orbit({ 0.01f * event.wheel.preciseY, 0, 0 });
 
-        } else if (event.type == SDL_KEYUP &&
-                   event.key.keysym.sym == SDLK_SPACE) {
-            paused_ = !paused_;
-
-        } else if (event.type == SDL_KEYUP &&
-                   event.key.keysym.sym == SDLK_d) {
-            draw_domain_ = !draw_domain_;
-
-        } else if (event.type == SDL_KEYUP &&
-                   event.key.keysym.sym == SDLK_o) {
-            draw_octree_ = !draw_octree_;
-
-            if (!draw_octree_) {
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-            } else {
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        } else if (event.type == SDL_KEYUP) {
+            switch (event.key.keysym.sym) {
+                case SDLK_SPACE:
+                    paused_ = !paused_;
+                    break;
+                case SDLK_d:
+                    draw_domain_ = !draw_domain_;
+                    break;
+                case SDLK_o:
+                    draw_octree_ = !draw_octree_;
+                    if (!draw_octree_) {
+                        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+                    } else {
+                        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                    }
+                    break;
+                case SDLK_1:
+                    start_simulation(SPAWN_UNIFORM);
+                    break;
+                case SDLK_2:
+                    start_simulation(SPAWN_SPHERE);
+                    break;
+                case SDLK_3:
+                    start_simulation(SPAWN_DISK);
+                    break;
             }
         }
     }
@@ -416,7 +445,7 @@ void Renderer::render_frame()
        shader_programs_[OCTREE_SHADER].enable();
         glBindVertexArray(cube_vao_);
         glDrawElementsInstanced(
-            GL_LINES, 24, GL_UNSIGNED_INT, 0, num_octree_nodes_);
+           GL_LINES, 24, GL_UNSIGNED_INT, 0, num_octree_nodes_);
     }
 
     if (draw_domain_) {

@@ -35,7 +35,7 @@ The program can be executed by running
 ./main
 ```
 
-Drag to orbit the camera around the origin, and scroll to zoom. Pressing `o` key toggles the octree visualization, `space` pauses/resumes the simulation.
+Drag to orbit the camera around the origin, and scroll to zoom. Pressing `o` toggles the octree visualization, `space` pauses/resumes the simulation, `1`, `2` and `3` spawn the particles in different initial configurations.
 
 ## Gallery
 

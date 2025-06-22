@@ -1,7 +1,5 @@
 #version 430 core
 
-// layout (depth_less) out float gl_FragDepth;
-
 in vec2 frag_uv;
 in vec4 particle_eye_pos;
 flat in int is_selected;
@@ -19,19 +17,9 @@ void main()
         discard;
     }
 
-    /*
-    vec3 normal = vec3(frag_uv, sqrt(1.0f - r));
-    vec4 frag_eye_pos = particle_eye_pos +
-                        vec4(normal * particle_radius, 0.0f);
-
-    vec4 frag_clip_pos = perspective_projection * frag_eye_pos;
-
-    gl_FragDepth = frag_clip_pos.z / frag_clip_pos.w;
-    */
-
     vec4 color = vec4(0.9f, 0.3f, 0.2f, 1.0f);
 
     // Simple sphere shading
     float falloff = 1.0f - r;
-    frag_color = color * vec4(1.0f, 1.0f, 1.0f, falloff * 0.1f);
+    frag_color = color * vec4(1.0f, 1.0f, 1.0f, falloff * 0.08f);
 }
