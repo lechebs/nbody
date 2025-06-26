@@ -57,6 +57,10 @@ Drag to orbit the camera around the origin, and scroll to zoom. Pressing `o` tog
 
 An additional video can be found [here](https://drive.google.com/file/d/1YTa5hYdYPj_kloaZWec7PzCBgfg7Z7SG/view?usp=sharing).
 
+### 4,194,304 particls at ~430ms per step (θ=0.6)
+
+![](screenshots/4mln.png)
+
 ## Bibliography
 
 - Tero Karras. 2012. Maximizing parallelism in the construction of BVHs, octrees, and k-d trees. In Proceedings of the Fourth ACM SIGGRAPH / Eurographics conference on High-Performance Graphics (EGGH-HPG'12). Eurographics Association, Goslar, DEU, 33–37.
