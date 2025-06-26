@@ -57,7 +57,7 @@ Drag to orbit the camera around the origin, and scroll to zoom. Pressing `o` tog
 
 An additional video can be found [here](https://drive.google.com/file/d/1YTa5hYdYPj_kloaZWec7PzCBgfg7Z7SG/view?usp=sharing).
 
-### 4,194,304 particls at ~430ms per step (θ=0.6)
+### 4,194,304 particles at ~430ms per step (θ=0.6)
 
 ![](screenshots/4mln.png)
 
