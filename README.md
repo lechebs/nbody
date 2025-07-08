@@ -61,6 +61,16 @@ An additional video can be found [here](https://drive.google.com/file/d/1YTa5hYd
 
 ![](screenshots/4mln.png)
 
+## Plots
+
+| ![](plots/disk-energy-32k-eps0.01-dt0.001.png) |  ![](plots/disk-acc-32k-eps0.01-dt0.001.png) |
+|:--------:|:-------:|
+| Total energy for 32,768 particles | Relative acceleration error for 32,768 particles |
+
+| ![](plots/exec-build-traversal-stacked.png) |  ![](plots/exec-scaling.png) |
+|:--------:|:-------:|
+| Execution time of a single step for θ=0.75 | Scalability for different values of θ (log-log) |
+
 ## Bibliography
 
 - Tero Karras. 2012. Maximizing parallelism in the construction of BVHs, octrees, and k-d trees. In Proceedings of the Fourth ACM SIGGRAPH / Eurographics conference on High-Performance Graphics (EGGH-HPG'12). Eurographics Association, Goslar, DEU, 33–37.
